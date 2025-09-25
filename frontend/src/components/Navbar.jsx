@@ -186,6 +186,7 @@ const Navbar = ({
           >
             <option value="qwen">Qwen (Free)</option>
             <option value="deepseek">DeepSeek (Free)</option>
+            <option value="grok">Grok (Free)</option>
           </select>
         </div>
         
