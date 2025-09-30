@@ -25,6 +25,8 @@ const AICompiler = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showHTMLPreview, setShowHTMLPreview] = useState(false);
   const [openFiles, setOpenFiles] = useState([]);
+const [htmlContent, setHtmlContent] = useState('');
+
 
   const editorRef = useRef(null);
   const API_URL = 'http://localhost:5000';
@@ -248,34 +250,43 @@ const AICompiler = () => {
     setLoadingInline(false);
   };
 
-  const handleRun = async () => {
-    if (fileType === 'html') {
-      setShowHTMLPreview(true);
-      setOutput(prev => prev + '\n--- HTML Preview Opened ---\n');
-      return;
+ const handleRun = async () => {
+  if (fileType === 'html') {
+    setHtmlContent(code);           // ← set HTML code here
+    setShowHTMLPreview(true);       // ← show the preview
+    setOutput(prev => prev + '\n--- HTML Preview Opened ---\n');
+    return;
+  }
+
+  setLoadingRun(true);
+  setOutput(prev => prev + '\n--- Running Code ---\n');
+
+  try {
+    const res = await fetch(`${API_URL}/api/run-js`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code, userInput: userInputQueue })
+    });
+
+    const data = await res.json();
+
+    setOutput(prev => prev + data.output + '\n');
+
+    if (data.requiresInput && data.promptMessage) {
+      setAwaitingInput(true);
+      setPromptMessage(data.promptMessage);
+    } else {
+      setAwaitingInput(false);
+      setUserInputQueue([]);
     }
-    setLoadingRun(true);
-    setOutput(prev => prev + '\n--- Running Code ---\n');
-    try {
-      const res = await fetch(`${API_URL}/api/run-js`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code, userInput: userInputQueue })
-      });
-      const data = await res.json();
-      setOutput(prev => prev + data.output + '\n');
-      if (data.requiresInput && data.promptMessage) {
-        setAwaitingInput(true);
-        setPromptMessage(data.promptMessage);
-      } else {
-        setAwaitingInput(false);
-        setUserInputQueue([]);
-      }
-    } catch (err) {
-      setOutput(prev => prev + `Error: ${err.message}\n`);
-    }
-    setLoadingRun(false);
-  };
+  } catch (err) {
+    setOutput(prev => prev + `Error: ${err.message}\n`);
+  }
+
+  setLoadingRun(false);
+};
+
+
 
   const handleAIFix = async () => {
     const selection = editorRef.current?.getModel()?.getValueInRange(editorRef.current.getSelection());
@@ -440,6 +451,7 @@ const AICompiler = () => {
       <div style={{ padding: '16px', borderBottom: '1px solid #333' }}>
         <Navbar
           onRun={handleRun}
+            onHTMLFileClick={() => handleRun()} // triggers HTML preview when HTML file is selected
           onAIFix={handleAIFix}
           onProcessInline={handleProcessInline}
           onClear={() => { 
@@ -613,12 +625,16 @@ const AICompiler = () => {
         clearOutput={() => setOutput('')}
       />
 
-      {showHTMLPreview && (
-        <HTMLPreview 
-          html={isStreaming ? streamingCode : code} 
-          onClose={() => setShowHTMLPreview(false)}
-        />
-      )}
+{showHTMLPreview && (
+  <HTMLPreview 
+    fileName={currentFileName} 
+    html={htmlContent}          // ← pass the actual HTML code
+    onClose={() => setShowHTMLPreview(false)} 
+  />
+)}
+
+
+
     </div>
   );
 };

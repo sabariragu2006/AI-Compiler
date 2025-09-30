@@ -7,6 +7,7 @@ const FileManager = ({ onLoad, onSave, onDelete, currentFileName, setFileType ,s
   const [loading, setLoading] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isAddingFile, setIsAddingFile] = useState(false);
+  
 
   const fetchFiles = async () => {
     try {

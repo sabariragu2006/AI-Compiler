@@ -18,7 +18,6 @@ const Navbar = ({
   awaitingInput,
   connectionStatus,
   fileManager,
-  // Removed fileType props
   onHTMLFileClick, // new prop
 }) => {
   return (

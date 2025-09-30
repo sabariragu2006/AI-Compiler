@@ -1,4 +1,3 @@
-// routes.js
 const express = require('express');
 const router = express.Router();
 
@@ -17,6 +16,10 @@ router.post('/api/files', fileController.saveFile);
 router.get('/api/files', fileController.getFiles);
 router.get('/api/files/:name', fileController.getFile);
 router.delete('/api/files/:name', fileController.deleteFile);
+
+// New: HTML preview + asset serving
+router.get('/api/preview/:name', fileController.previewFile);
+router.get('/api/assets/:name', fileController.serveAsset);
 
 // -------- AI ROUTES --------
 router.post('/api/compile-streaming', aiController.compileStreaming);
