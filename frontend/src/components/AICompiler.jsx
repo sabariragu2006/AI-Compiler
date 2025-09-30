@@ -1,622 +1,460 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
-import * as monaco from 'monaco-editor';
-import { debounce } from 'lodash';
+import React, { useState, useEffect, useRef } from 'react';
+import { Editor } from './Editor';
+import { X } from 'lucide-react';
 import Navbar from './Navbar';
+import Terminal from './Terminal';
+import FileManager from './FileManager';
+import HTMLPreview from './HTMLPreview';
+import debounce from 'lodash.debounce';
 
-const defineXxxLanguage = () => {
-  // Register the custom language
-  monaco.languages.register({ id: 'javascript-xxx' });
-  
-  // Define the custom theme with xxx highlighting
-  monaco.editor.defineTheme('vs-dark-xxx', {
-    base: 'vs-dark',
-    inherit: true,
-    rules: [
-      { token: 'xxx-keyword', foreground: 'FFD700', fontStyle: 'bold' },
-      { token: 'xxx-instruction', foreground: '90EE90', fontStyle: 'italic' }
-    ],
-    colors: {}
-  });
-  
-  // Define tokenizer for xxx highlighting with proper JavaScript syntax
-  monaco.languages.setMonarchTokensProvider('javascript-xxx', {
-    keywords: [
-      'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger',
-      'default', 'delete', 'do', 'else', 'export', 'extends', 'false', 'finally',
-      'for', 'function', 'if', 'import', 'in', 'instanceof', 'let', 'new', 'null',
-      'return', 'super', 'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var',
-      'void', 'while', 'with', 'yield', 'async', 'await', 'of'
-    ],
-    
-    typeKeywords: [
-      'any', 'boolean', 'number', 'object', 'string', 'undefined'
-    ],
-    
-    operators: [
-      '<=', '>=', '==', '!=', '===', '!==', '=>', '+', '-', '*', '/', '%',
-      '++', '--', '<<', '>>', '>>>', '&', '|', '^', '!', '~', '&&', '||',
-      '?', ':', '=', '+=', '-=', '*=', '/=', '%=', '<<=', '>>=', '>>>=',
-      '&=', '|=', '^='
-    ],
-    
-    symbols: /[=><!~?:&|+\-*\/\^%]+/,
-    escapes: /\\(?:[abfnrtv\\"']|x[0-9A-Fa-f]{1,4}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})/,
-    
-    tokenizer: {
-      root: [
-        [/^(\s*)(xxx)(\s+)(.*)$/, ['white', 'xxx-keyword', 'white', 'xxx-instruction']],
-        [/[a-z_$][\w$]*/, { cases: { '@typeKeywords': 'keyword', '@keywords': 'keyword', '@default': 'identifier' } }],
-        [/[A-Z][\w\$]*/, 'type.identifier'],
-        { include: '@whitespace' },
-        [/\d*\.\d+([eE][\-+]?\d+)?/, 'number.float'],
-        [/0[xX][0-9a-fA-F]+/, 'number.hex'],
-        [/\d+/, 'number'],
-        [/[;,.]/, 'delimiter'],
-        [/[{}()\[\]]/, '@brackets'],
-        [/@symbols/, { cases: { '@operators': 'operator', '@default': '' } }],
-        [/"([^"\\]|\\.)*$/, 'string.invalid'],
-        [/'([^'\\]|\\.)*$/, 'string.invalid'],
-        [/"/, 'string', '@string_double'],
-        [/'/, 'string', '@string_single'],
-        [/`/, 'string', '@string_backtick']
-      ],
-      
-      whitespace: [
-        [/[ \t\r\n]+/, 'white'],
-        [/\/\*/, 'comment', '@comment'],
-        [/\/\/.*$/, 'comment']
-      ],
-      
-      comment: [
-        [/[^\/*]+/, 'comment'],
-        [/\/\*/, 'comment', '@push'],
-        [/\*\//, 'comment', '@pop'],
-        [/[\/*]/, 'comment']
-      ],
-      
-      string_double: [
-        [/[^\\"]+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/"/, 'string', '@pop']
-      ],
-      
-      string_single: [
-        [/[^\\']+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/'/, 'string', '@pop']
-      ],
-      
-      string_backtick: [
-        [/\$\{/, { token: 'delimiter.bracket', next: '@bracketCounting' }],
-        [/[^\\`$]+/, 'string'],
-        [/@escapes/, 'string.escape'],
-        [/\\./, 'string.escape.invalid'],
-        [/`/, 'string', '@pop']
-      ],
-      
-      bracketCounting: [
-        [/\{/, 'delimiter.bracket', '@bracketCounting'],
-        [/\}/, 'delimiter.bracket', '@pop'],
-        { include: 'root' }
-      ]
-    }
-  });
-};
-
-// Initialize language definition once
-let languageDefined = false;
-if (!languageDefined) {
-  defineXxxLanguage();
-  languageDefined = true;
-}
-
-const AICompiler = ({ code: externalCode, setCode: setExternalCode, currentFile, setCurrentFile }) => {
-  const [code, setCode] = useState(
-    externalCode || '// Write JavaScript code here\n// Use "xxx [instruction]" on any line for AI code generation\n// Examples:\n// xxx create a function to reverse a string\n// xxx make a fibonacci sequence generator\n\nconsole.log("Hello, AI Compiler!");'
-  );
-  const [selectedCode, setSelectedCode] = useState('');
-  const [selectedRange, setSelectedRange] = useState(null);
-  const [runOutput, setRunOutput] = useState('');
-  const [loadingAI, setLoadingAI] = useState(false);
+const AICompiler = () => {
+  const [code, setCode] = useState('');
+  const [fileType, setFileType] = useState('js');
+  const [output, setOutput] = useState('');
+  const [model, setModel] = useState('qwen');
+  const [autoProcessInline, setAutoProcessInline] = useState(true);
   const [loadingRun, setLoadingRun] = useState(false);
+  const [loadingAI, setLoadingAI] = useState(false);
   const [loadingInline, setLoadingInline] = useState(false);
-  const [model, setModel] = useState('deepseek');
-  const [autoProcessInline, setAutoProcessInline] = useState(false);
-  const [userInputs, setUserInputs] = useState([]);
-  const [currentPrompt, setCurrentPrompt] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState('checking');
+  const [currentFileName, setCurrentFileName] = useState('');
+  const [userInputQueue, setUserInputQueue] = useState([]);
   const [awaitingInput, setAwaitingInput] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState('300px');
-  const [isResizing, setIsResizing] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saved', 'saving', 'unsaved'
-  
+  const [promptMessage, setPromptMessage] = useState('');
+  const [streamingCode, setStreamingCode] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [showHTMLPreview, setShowHTMLPreview] = useState(false);
+  const [openFiles, setOpenFiles] = useState([]);
+
   const editorRef = useRef(null);
-  const timeoutRef = useRef(null);
-  const outputRef = useRef(null);
-  const saveTimeoutRef = useRef(null);
+  const API_URL = 'http://localhost:5000';
+  const abortControllerRef = useRef(null);
 
-  // Update code when external code changes (file selection)
+  // =============== CONNECTION CHECK ===============
   useEffect(() => {
-    if (externalCode !== undefined && externalCode !== code) {
-      setCode(externalCode);
-      setSaveStatus('saved');
-      if (editorRef.current) {
-        editorRef.current.setValue(externalCode);
-      }
-    }
-  }, [externalCode]);
-
-  // Auto-save functionality with debouncing
-  const debouncedSave = useCallback(
-    debounce(async (codeContent, fileToSave) => {
-      if (!fileToSave || !codeContent) return;
-      
+    const checkConnection = async () => {
       try {
-        setSaveStatus('saving');
-        const response = await fetch('http://localhost:5000/api/files', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: fileToSave, content: codeContent })
-        });
-        
-        if (response.ok) {
-          setSaveStatus('saved');
-        } else {
-          setSaveStatus('unsaved');
-          console.error('Failed to save file');
-        }
-      } catch (error) {
-        setSaveStatus('unsaved');
-        console.error('Auto-save error:', error);
+        const res = await fetch(`${API_URL}/health`);
+        setConnectionStatus(res.ok ? 'connected' : 'disconnected');
+      } catch {
+        setConnectionStatus('disconnected');
       }
-    }, 1000),
-    []
-  );
-
-  // Auto-save when code changes
-  useEffect(() => {
-    const fileName = currentFile?.name || 'untitled.js';
-    
-    if (fileName && code && fileName !== 'untitled.js') {
-      setSaveStatus('unsaved');
-      debouncedSave(code, fileName);
-    }
-
-    return () => {
-      debouncedSave.cancel();
     };
-  }, [code, currentFile, debouncedSave]);
+    checkConnection();
+    const interval = setInterval(checkConnection, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
-  // Auto-scroll output
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  // =============== AUTO-SAVE ===============
+ const debouncedAutoSave = useRef(
+  debounce(async (content) => {
+    if (!currentFileName || content === undefined || isStreaming) {
+      console.warn('🚫 Skip auto-save:', { currentFileName, content, isStreaming });
+      return;
     }
-  }, [runOutput, awaitingInput]);
-
-  // Handle code changes and detect inline prompts
-  const handleCodeChange = useCallback((value) => {
-    const newCode = value || '';
-    setCode(newCode);
-    
-    // Notify parent component
-    if (setExternalCode) {
-      setExternalCode(newCode);
+    try {
+      console.log('💾 Auto-saving:', currentFileName, 'Content length:', content.length);
+      const res = await fetch(`${API_URL}/api/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: currentFileName, content })
+      });
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`HTTP ${res.status}: ${errorText}`);
+      }
+      console.log('✅ Auto-saved:', currentFileName);
+    } catch (err) {
+      console.error('⚠️ Auto-save failed for', currentFileName, err);
     }
-    
-    // Auto-process inline prompts if enabled
-    if (autoProcessInline && newCode) {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+  }, 1000)
+);
+
+  // =============== FILE OPERATIONS ===============
+  const handleSaveFile = async (fileName) => {
+    try {
+      const res = await fetch(`${API_URL}/api/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: fileName, content: code })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOutput(prev => prev + `File saved: ${fileName}\n`);
+        return true;
       }
-      
-      timeoutRef.current = setTimeout(() => {
-        handleProcessInline(newCode);
-      }, 2000);
+      setOutput(prev => prev + `Failed to save file\n`);
+      return false;
+    } catch (err) {
+      setOutput(prev => prev + `Error saving file: ${err.message}\n`);
+      return false;
     }
-  }, [autoProcessInline, setExternalCode]);
-
-  const handleEditorDidMount = (editor) => {
-    editorRef.current = editor;
-    
-    // Selection change handler
-    editor.onDidChangeCursorSelection(() => {
-      const selection = editor.getSelection();
-      const selectionText = editor.getModel()?.getValueInRange(selection) || '';
-      setSelectedCode(selectionText);
-      setSelectedRange(selectionText ? selection : null);
-    });
-
-    // Handle Enter key to process xxx lines
-    editor.onKeyDown((e) => {
-      if (e.keyCode === monaco.KeyCode.Enter) {
-        const position = editor.getPosition();
-        const model = editor.getModel();
-        const lineContent = model.getLineContent(position.lineNumber);
-        
-        if (lineContent.trim().startsWith('xxx ')) {
-          e.preventDefault();
-          
-          const instruction = lineContent.trim().substring(4);
-          if (instruction) {
-            processSingleInstruction(instruction, position.lineNumber);
-          }
-        }
-      }
-    });
-
-    // Add keyboard shortcuts
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyI, () => {
-      handleProcessInline();
-    });
-
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyA, () => {
-      handleAIClick();
-    });
-
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-      handleRunClick();
-    });
-
-    // Manual save shortcut
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-      if (currentFile) {
-        debouncedSave.flush(); // Force immediate save
-      }
-    });
   };
 
-  // Process a single xxx instruction when Enter is pressed
-  const processSingleInstruction = async (instruction, lineNumber) => {
-    if (loadingInline) return;
-    
-    setLoadingInline(true);
-    
+  // Called by FileManager (with content) and loadFileByName
+  const handleLoadFile = async (fileName, content) => {
+    setCode(content);
+    setCurrentFileName(fileName);
+    setOutput(prev => prev + `Loaded: ${fileName}\n`);
+
+    if (!openFiles.includes(fileName)) {
+      setOpenFiles(prev => [...prev, fileName]);
+    }
+
+    const extension = fileName.split('.').pop().toLowerCase();
+    if (extension === 'html' || extension === 'htm') {
+      setFileType('html');
+    } else {
+      setFileType('javascript');
+    }
+  };
+
+  const handleDeleteFile = async (fileName) => {
     try {
-      const res = await fetch('http://localhost:5000/api/compile', {
+      const res = await fetch(`${API_URL}/api/files/${fileName}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOutput(prev => prev + `Deleted: ${fileName}\n`);
+        setOpenFiles(prev => prev.filter(f => f !== fileName));
+        if (currentFileName === fileName) {
+          const remaining = openFiles.filter(f => f !== fileName);
+          if (remaining.length > 0) {
+            loadFileByName(remaining[0]);
+          } else {
+            setCurrentFileName('');
+            setCode('');
+          }
+        }
+        return true;
+      }
+      setOutput(prev => prev + `Failed to delete file\n`);
+      return false;
+    } catch (err) {
+      setOutput(prev => prev + `Error deleting file: ${err.message}\n`);
+      return false;
+    }
+  };
+
+  // =============== LOAD FILE BY NAME (for tabs) ===============
+  const loadFileByName = async (fileName) => {
+    if (currentFileName === fileName) return;
+    try {
+      const res = await fetch(`${API_URL}/api/files/${fileName}`);
+      if (!res.ok) throw new Error('File not found');
+      const data = await res.json();
+      handleLoadFile(fileName, data.content);
+    } catch (err) {
+      setOutput(prev => prev + `Error loading ${fileName}: ${err.message}\n`);
+    }
+  };
+
+  const handleCloseTab = (fileName, e) => {
+    e.stopPropagation();
+    setOpenFiles(prev => prev.filter(f => f !== fileName));
+    if (currentFileName === fileName) {
+      const remaining = openFiles.filter(f => f !== fileName);
+      if (remaining.length > 0) {
+        loadFileByName(remaining[0]);
+      } else {
+        setCurrentFileName('');
+        setCode('');
+      }
+    }
+  };
+
+  // =============== CODE CHANGE HANDLER ===============
+  const handleCodeChange = (newCode) => {
+    setCode(newCode);
+    if (currentFileName && !isStreaming) {
+      debouncedAutoSave.current(newCode);
+    }
+  };
+
+  // =============== AI & RUN HANDLERS ===============
+  const handleInlineExecution = async (lineIndex, instruction) => {
+    if (loadingInline) return;
+    setLoadingInline(true);
+    setOutput(prev => prev + `\n> Processing: ${instruction}\n`);
+    if (editorRef.current) {
+      editorRef.current.startStreaming(lineIndex);
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/compile-streaming`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           prompt: instruction, 
           model,
-          isInlinePrompt: true
-        }),
+          isInlinePrompt: true,
+          codeType: fileType,
+          fileName: currentFileName
+        })
       });
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.body) throw new Error('Streaming not supported');
 
-      const data = await res.json();
-      const generatedCode = data.code;
+      const reader = res.body.getReader();
+      let generatedCode = '';
+      let finalCleanCode = null;
 
-      if (generatedCode && editorRef.current) {
-        const editor = editorRef.current;
-        const model = editor.getModel();
-        
-        const line = model.getLineContent(lineNumber);
-        const range = new monaco.Range(lineNumber, 1, lineNumber, line.length + 1);
-        
-        editor.executeEdits(null, [{ 
-          range: range, 
-          text: generatedCode + '\n',
-          forceMoveMarkers: true 
-        }]);
-
-        setRunOutput(`Generated code for: "${instruction}"`);
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = new TextDecoder().decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim());
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.token) {
+                generatedCode += data.token;
+                if (editorRef.current) {
+                  editorRef.current.appendStreamingText(data.token);
+                }
+              }
+              if (data.cleanCode !== undefined) {
+                finalCleanCode = data.cleanCode;
+              }
+              if (data.done) break;
+            } catch (e) {
+              console.error('Parse error:', e);
+            }
+          }
+        }
       }
+
+      const cleanGeneratedCode = finalCleanCode !== null ? finalCleanCode : generatedCode.trim();
+      const trulyCleanCode = cleanGeneratedCode
+        .replace(/```(?:javascript|js|html|xml)?\s*([\s\S]*?)\s*```/gi, '$1')
+        .replace(/^```[\s\S]*?```$/gm, '')
+        .replace(/^```.*$/gm, '')
+        .replace(/^.*```$/gm, '')
+        .trim();
+
+      const lines = code.split('\n');
+      lines[lineIndex] = trulyCleanCode || cleanGeneratedCode;
+      const newCode = lines.join('\n');
+
+      if (editorRef.current) {
+        editorRef.current.finishStreaming(newCode);
+      }
+      setCode(newCode);
+      setOutput(prev => prev + `Generated: ${trulyCleanCode.length} characters\n`);
     } catch (err) {
-      console.error(err);
-      setRunOutput(`Error generating code: ${err.message}`);
-    } finally {
-      setLoadingInline(false);
+      setOutput(prev => prev + `Error: ${err.message}\n`);
     }
+    setLoadingInline(false);
   };
 
-  // Process inline prompts (xxx instructions)
-  const handleProcessInline = async (codeToProcess = null) => {
-    const targetCode = codeToProcess || code;
-    const hasInlinePrompts = targetCode.includes('xxx ');
-    
-    if (!hasInlinePrompts) {
-      setRunOutput('No inline prompts (xxx) found in code.');
+  const handleRun = async () => {
+    if (fileType === 'html') {
+      setShowHTMLPreview(true);
+      setOutput(prev => prev + '\n--- HTML Preview Opened ---\n');
       return;
     }
-
-    setLoadingInline(true);
-
+    setLoadingRun(true);
+    setOutput(prev => prev + '\n--- Running Code ---\n');
     try {
-      const res = await fetch('http://localhost:5000/api/process-inline', {
+      const res = await fetch(`${API_URL}/api/run-js`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: targetCode, model }),
+        body: JSON.stringify({ code, userInput: userInputQueue })
       });
-
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
       const data = await res.json();
-      
-      if (data.processedCode && data.processedCode !== targetCode) {
-        setCode(data.processedCode);
-        
-        if (editorRef.current) {
-          editorRef.current.setValue(data.processedCode);
-        }
-
-        if (data.changes.length > 0) {
-          const changesSummary = data.changes.map(change => 
-            change.error ? 
-              `❌ Line ${change.startLine + 1}: ${change.error}` :
-              `✅ Line ${change.startLine + 1}: Generated code for "${change.instruction}"`
-          ).join('\n');
-          
-          setRunOutput(`Inline Processing Results:\n${changesSummary}`);
-        } else {
-          setRunOutput('No changes made during inline processing.');
-        }
+      setOutput(prev => prev + data.output + '\n');
+      if (data.requiresInput && data.promptMessage) {
+        setAwaitingInput(true);
+        setPromptMessage(data.promptMessage);
       } else {
-        setRunOutput('No changes were needed or generated.');
+        setAwaitingInput(false);
+        setUserInputQueue([]);
       }
     } catch (err) {
-      console.error(err);
-      setRunOutput(`Error processing inline prompts: ${err.message}`);
-    } finally {
-      setLoadingInline(false);
+      setOutput(prev => prev + `Error: ${err.message}\n`);
     }
+    setLoadingRun(false);
   };
 
-  // Fix selected code or generate new code with AI
-  const handleAIClick = async () => {
-    if (!selectedCode.trim()) {
-      setRunOutput('Please select code to fix with AI.');
+  const handleAIFix = async () => {
+    const selection = editorRef.current?.getModel()?.getValueInRange(editorRef.current.getSelection());
+    const targetCode = selection || code;
+    if (!targetCode.trim()) {
+      setOutput(prev => prev + 'No code selected\n');
       return;
     }
 
     setLoadingAI(true);
+    setIsStreaming(true);
+    setStreamingCode('');
+    setOutput(prev => prev + '🤖 AI is analyzing and streaming code...\n');
+    abortControllerRef.current = new AbortController();
 
     try {
-      const res = await fetch('http://localhost:5000/api/compile', {
+      const res = await fetch(`${API_URL}/api/compile-streaming`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          code: selectedCode, 
-          model 
+          code: targetCode, 
+          model,
+          codeType: fileType,
+          fileName: currentFileName
         }),
+        signal: abortControllerRef.current.signal
       });
 
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      if (!res.body) throw new Error('Streaming not supported');
 
-      const data = await res.json();
-      const generatedCode = data.code;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let accumulatedCode = '';
+      let tokenCount = 0;
 
-      if (!generatedCode) {
-        setRunOutput('No code generated by AI.');
-        return;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          setIsStreaming(false);
+          break;
+        }
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n').filter(line => line.trim());
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.error) {
+                setOutput(prev => prev + `❌ Error: ${data.error}\n`);
+                setIsStreaming(false);
+                setLoadingAI(false);
+                return;
+              }
+              if (data.token) {
+                accumulatedCode += data.token;
+                tokenCount++;
+                setStreamingCode(accumulatedCode);
+                if (tokenCount % 50 === 0) {
+                  setOutput(prev => {
+                    const lines = prev.split('\n');
+                    const lastLine = lines[lines.length - 1];
+                    if (lastLine.startsWith('📊')) {
+                      lines[lines.length - 1] = `📊 Streaming... ${tokenCount} tokens received`;
+                      return lines.join('\n');
+                    }
+                    return prev + `📊 Streaming... ${tokenCount} tokens received\n`;
+                  });
+                }
+              }
+              if (data.done) {
+                const finalCode = data.cleanCode || accumulatedCode.trim();
+                const cleanedCode = finalCode
+                  .replace(/```(?:javascript|js|html|xml)?\s*([\s\S]*?)\s*```/gi, '$1')
+                  .replace(/^```[\s\S]*?```$/gm, '')
+                  .replace(/^```.*$/gm, '')
+                  .replace(/^.*```$/gm, '')
+                  .trim();
+                setCode(cleanedCode);
+                setStreamingCode('');
+                setIsStreaming(false);
+                setOutput(prev => prev + `✅ AI complete! Generated ${cleanedCode.length} characters (${tokenCount} tokens)\n`);
+                break;
+              }
+            } catch (parseErr) {
+              console.error('Parse error:', parseErr);
+            }
+          }
+        }
       }
-
-      const editor = editorRef.current;
-      if (editor && generatedCode && selectedRange) {
-        editor.executeEdits(null, [{ 
-          range: selectedRange, 
-          text: generatedCode, 
-          forceMoveMarkers: true 
-        }]);
-      }
-
-      setRunOutput(`AI Code Fixed Successfully!`);
     } catch (err) {
-      console.error(err);
-      setRunOutput(`Error interacting with AI: ${err.message}`);
-    } finally {
+      if (err.name === 'AbortError') {
+        setOutput(prev => prev + '⚠️ Streaming cancelled by user\n');
+      } else {
+        setOutput(prev => prev + `❌ Error: ${err.message}\n`);
+      }
+      setStreamingCode('');
+      setIsStreaming(false);
+    }
+    setLoadingAI(false);
+    abortControllerRef.current = null;
+  };
+
+  const handleStopStreaming = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      setIsStreaming(false);
       setLoadingAI(false);
+      setStreamingCode('');
+      setOutput(prev => prev + '⏹️ Streaming stopped\n');
     }
   };
 
-  // Run JavaScript code
-  const handleRunClick = async () => {
-    setLoadingRun(true);
-    setRunOutput('Running code...');
-
+  const handleProcessInline = async () => {
+    setLoadingInline(true);
+    setOutput(prev => prev + 'Processing inline prompts...\n');
     try {
-      const res = await fetch('http://localhost:5000/api/run-js', {
+      const res = await fetch(`${API_URL}/api/process-inline`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          code, 
-          userInput: userInputs
-        }),
+        body: JSON.stringify({ code, model, fileName: currentFileName })
       });
-
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
       const data = await res.json();
-      
-      if (data.requiresInput) {
-        setCurrentPrompt(data.promptMessage || 'Enter input:');
-        setAwaitingInput(true);
-        setRunOutput(data.output);
+      if (data.error) {
+        setOutput(prev => prev + `Error: ${data.error}\n`);
       } else {
-        setRunOutput(data.output || 'Code executed successfully');
-        setUserInputs([]);
-        setAwaitingInput(false);
-        setCurrentPrompt(null);
+        setCode(data.processedCode);
+        setOutput(prev => prev + `Processed ${data.changes.length} inline prompt(s)\n`);
       }
     } catch (err) {
-      console.error(err);
-      setRunOutput(`Error executing code: ${err.message}`);
-      setUserInputs([]);
-      setAwaitingInput(false);
-      setCurrentPrompt(null);
-    } finally {
-      setLoadingRun(false);
+      setOutput(prev => prev + `Error: ${err.message}\n`);
     }
+    setLoadingInline(false);
   };
 
-  // Handle user input submission
-  const handleInputSubmit = (inputValue) => {
-    const newInputs = [...userInputs, inputValue];
-    setUserInputs(newInputs);
+  const handleUserInput = (input) => {
+    setUserInputQueue(prev => [...prev, input]);
     setAwaitingInput(false);
-    setCurrentPrompt(null);
-    
-    setTimeout(() => {
-      runCodeWithInputs(newInputs);
-    }, 100);
+    setOutput(prev => prev + `> ${input}\n`);
+    setTimeout(() => handleRun(), 100);
   };
 
-  // Run code with provided inputs
-  const runCodeWithInputs = async (inputs) => {
-    setLoadingRun(true);
-    
-    try {
-      const res = await fetch('http://localhost:5000/api/run-js', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          code, 
-          userInput: inputs
-        }),
-      });
-
-      if (!res.ok) throw new Error(`Server error: ${res.status}`);
-
-      const data = await res.json();
-      
-      if (data.requiresInput) {
-        setCurrentPrompt(data.promptMessage || 'Enter input:');
-        setAwaitingInput(true);
-        setRunOutput(data.output);
-      } else {
-        setRunOutput(data.output || 'Code executed successfully');
-        setUserInputs([]);
-        setAwaitingInput(false);
-        setCurrentPrompt(null);
-      }
-    } catch (err) {
-      console.error(err);
-      setRunOutput(`Error executing code: ${err.message}`);
-      setUserInputs([]);
-      setAwaitingInput(false);
-      setCurrentPrompt(null);
-    } finally {
-      setLoadingRun(false);
-    }
+  const handleFileTypeChange = (newType) => {
+    setFileType(newType);
+    setCode('');
+    setOutput('');
+    setCurrentFileName('');
+    setOpenFiles([]);
   };
 
-  // Clear editor
-  const handleClearEditor = () => {
-    const defaultCode = '// Write JavaScript code here\n// Use "xxx [instruction]" on any line for AI code generation\n// Press Enter after typing xxx instruction to generate code\n\nconsole.log("Hello, AI Compiler!");';
-    setCode(defaultCode);
-    setRunOutput('');
-    setUserInputs([]);
-    setAwaitingInput(false);
-    setCurrentPrompt(null);
-    if (editorRef.current) {
-      editorRef.current.setValue(defaultCode);
-    }
-  };
-
-  // Handle terminal resize
-  const handleMouseDown = (e) => {
-    e.preventDefault();
-    setIsResizing(true);
-    
-    const startY = e.clientY;
-    const startHeight = parseInt(terminalHeight);
-    
-    const handleMouseMove = (e) => {
-      const deltaY = startY - e.clientY;
-      const newHeight = Math.max(120, Math.min(window.innerHeight * 0.6, startHeight + deltaY));
-      setTerminalHeight(`${newHeight}px`);
-    };
-    
-    const handleMouseUp = () => {
-      setIsResizing(false);
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-    };
-    
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
-  };
-
-  const canUseAI = selectedCode.trim();
   const hasInlinePrompts = code.includes('xxx ');
-
-  // Cleanup timeouts on unmount
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-      debouncedSave.cancel();
-    };
-  }, [debouncedSave]);
-
-  // Add resize cursor style to body when resizing
-  useEffect(() => {
-    if (isResizing) {
-      document.body.style.cursor = 'ns-resize';
-      document.body.style.userSelect = 'none';
-    } else {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    
-    return () => {
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-  }, [isResizing]);
-
-  // Get save status indicator
-  const getSaveStatusIcon = () => {
-    switch (saveStatus) {
-      case 'saving':
-        return '💾';
-      case 'unsaved':
-        return '●';
-      case 'saved':
-      default:
-        return '';
-    }
-  };
-
-  const getSaveStatusText = () => {
-    switch (saveStatus) {
-      case 'saving':
-        return 'Saving...';
-      case 'unsaved':
-        return 'Unsaved changes';
-      case 'saved':
-      default:
-        return currentFile ? `${currentFile.name}` : 'untitled.js';
-    }
-  };
+  const canUseAI = code.trim().length > 0;
 
   return (
     <div style={{ 
       display: 'flex', 
       flexDirection: 'column', 
-      height: '100vh',
-      width: '100%',
-      margin: 0,
-      padding: 0,
+      height: '100vh', 
       backgroundColor: '#1e1e1e',
       color: '#d4d4d4',
-      fontFamily: 'Segoe UI, sans-serif',
-      overflow: 'hidden'
+      fontFamily: 'system-ui, -apple-system, sans-serif'
     }}>
-      {/* Navigation Bar */}
-      <div style={{ padding: '0.5rem 1rem' }}>
+      <div style={{ padding: '16px', borderBottom: '1px solid #333' }}>
         <Navbar
-          onRun={handleRunClick}
-          onAIFix={handleAIClick}
-          onProcessInline={() => handleProcessInline()}
-          onClear={handleClearEditor}
+          onRun={handleRun}
+          onAIFix={handleAIFix}
+          onProcessInline={handleProcessInline}
+          onClear={() => { 
+            setCode(''); 
+            setOutput(''); 
+            setCurrentFileName(''); 
+            setAwaitingInput(false);
+            setUserInputQueue([]);
+            setStreamingCode('');
+            setIsStreaming(false);
+            setOpenFiles([]);
+            if (abortControllerRef.current) {
+              abortControllerRef.current.abort();
+            }
+          }}
           model={model}
           onModelChange={setModel}
           autoProcessInline={autoProcessInline}
@@ -627,215 +465,160 @@ const AICompiler = ({ code: externalCode, setCode: setExternalCode, currentFile,
           canUseAI={canUseAI}
           hasInlinePrompts={hasInlinePrompts}
           awaitingInput={awaitingInput}
+          connectionStatus={connectionStatus}
+          fileType={fileType}
+          onFileTypeChange={handleFileTypeChange}
+          isStreaming={isStreaming}
+          onStopStreaming={handleStopStreaming}
         />
       </div>
 
-      {/* File Tab Bar */}
-      {currentFile && (
+      {isStreaming && (
         <div style={{
-          padding: '0 1rem',
-          borderBottom: '1px solid #3e3e42',
-          backgroundColor: '#2d2d30'
+          padding: '8px 16px',
+          backgroundColor: '#264f78',
+          color: '#fff',
+          borderBottom: '1px solid #333',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          fontSize: '14px'
         }}>
           <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '8px 12px',
-            backgroundColor: '#1e1e1e',
-            border: '1px solid #3e3e42',
-            borderBottom: 'none',
-            borderTopLeftRadius: '4px',
-            borderTopRightRadius: '4px',
-            fontSize: '13px',
-            gap: '6px',
-            color: '#d4d4d4'
-          }}>
-            <span>📄</span>
-            <span>{getSaveStatusText()}</span>
-            <span style={{ color: saveStatus === 'unsaved' ? '#f1fa8c' : 'transparent' }}>
-              {getSaveStatusIcon()}
-            </span>
-          </div>
+            width: '16px',
+            height: '16px',
+            border: '2px solid #fff',
+            borderTop: '2px solid transparent',
+            borderRadius: '50%',
+            animation: 'spin 1s linear infinite'
+          }} />
+          <span>AI is streaming code... Click Stop button to cancel</span>
+          <style>{`
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+          `}</style>
         </div>
       )}
 
-      <div style={{ 
-        flex: 1, 
-        display: 'flex', 
-        flexDirection: 'column',
-        minHeight: 0 
-      }}>
-        {/* Editor Panel */}
-        <div style={{ 
-          flex: 1, 
-          display: 'flex', 
-          flexDirection: 'column',
-          minHeight: 0
-        }}>
-          <div style={{ 
-            flex: 1, 
-            border: '1px solid #3e3e42',
-            overflow: 'hidden',
-            margin: '0 1rem'
-          }}>
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        <FileManager
+          onLoad={handleLoadFile}
+          onSave={handleSaveFile}
+          onDelete={handleDeleteFile}
+          currentFileName={currentFileName}
+          setCurrentFileName={setCurrentFileName}
+          fileType={fileType}
+          setFileType={setFileType}
+        />
+        
+        <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
+          {openFiles.length > 0 && (
+            <div style={{
+              display: 'flex',
+              backgroundColor: '#2d2d30',
+              borderBottom: '1px solid #3e3e42',
+              overflowX: 'auto'
+            }}>
+              {openFiles.map(fileName => (
+                <div
+                  key={fileName}
+                  onClick={() => loadFileByName(fileName)} // ✅ FIXED: loads content
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: currentFileName === fileName ? '#1e1e1e' : 'transparent',
+                    borderRight: '1px solid #3e3e42',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '13px',
+                    color: currentFileName === fileName ? '#cccccc' : '#858585',
+                    minWidth: '120px',
+                    maxWidth: '200px'
+                  }}
+                >
+                  <span style={{ 
+                    overflow: 'hidden', 
+                    textOverflow: 'ellipsis', 
+                    whiteSpace: 'nowrap',
+                    flex: 1
+                  }}>
+                    {fileName}
+                  </span>
+                  <button
+                    onClick={(e) => handleCloseTab(fileName, e)}
+                    style={{
+                      padding: '2px',
+                      backgroundColor: 'transparent',
+                      color: '#858585',
+                      border: 'none',
+                      borderRadius: '2px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {currentFileName ? (
             <Editor
               height="100%"
-              language="javascript-xxx"
-              theme="vs-dark-xxx"
-              value={code}
-              onChange={handleCodeChange}
-              onMount={handleEditorDidMount}
+              language={fileType === 'html' ? 'html' : 'javascript'}
+              theme="vs-dark"
+              value={isStreaming ? streamingCode : code}
+              onChange={isStreaming ? null : handleCodeChange} // ✅ Correct
+              onMount={(editor) => { editorRef.current = editor; }}
+              onEnterKey={handleInlineExecution}
               options={{
-                fontSize: 14,
                 minimap: { enabled: false },
-                automaticLayout: true,
-                wordWrap: 'on',
+                fontSize: 14,
                 lineNumbers: 'on',
-                renderWhitespace: 'boundary',
                 scrollBeyondLastLine: false,
-                suggestOnTriggerCharacters: true,
-                acceptSuggestionOnCommitCharacter: true,
-                acceptSuggestionOnEnter: 'on',
-                tabCompletion: 'on',
-                fontFamily: 'Consolas, "Courier New", monospace'
+                readOnly: isStreaming
               }}
             />
-          </div>
-        </div>
-        
-        {/* Resizable Terminal Panel */}
-        <div style={{ 
-          height: terminalHeight,
-          minHeight: '120px',
-          maxHeight: '60vh',
-          display: 'flex',
-          flexDirection: 'column',
-          borderTop: '1px solid #3e3e42',
-          margin: '0 1rem'
-        }}>
-          {/* Terminal Header with Resize Handle */}
-          <div 
-            style={{ 
-              height: '32px',
-              backgroundColor: '#252526',
+          ) : (
+            <div style={{
+              flex: 1,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '0 1rem',
-              cursor: 'ns-resize',
-              borderBottom: '1px solid #3e3e42',
-              userSelect: 'none'
-            }}
-            onMouseDown={handleMouseDown}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#cccccc', textTransform: 'uppercase' }}>Terminal</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <button
-                onClick={() => setRunOutput('')}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#cccccc',
-                  cursor: 'pointer',
-                  padding: '2px 6px',
-                  borderRadius: '3px',
-                  fontSize: '12px'
-                }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = '#3e3e42'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
-              >
-                Clear
-              </button>
-              <div style={{ 
-                width: '20px', 
-                height: '4px', 
-                backgroundColor: '#555',
-                borderRadius: '2px',
-                cursor: 'ns-resize'
-              }} />
-            </div>
-          </div>
-
-          {/* Terminal Content */}
-          <div
-            ref={outputRef}
-            style={{
-              flex: 1,
-              backgroundColor: '#1e1e1e',
-              padding: '1rem',
-              overflowY: 'auto',
-              fontSize: '13px',
-              lineHeight: '1.4',
-              color: '#d4d4d4',
-              display: 'flex',
+              justifyContent: 'center',
               flexDirection: 'column',
-              fontFamily: 'Consolas, "Courier New", monospace'
-            }}
-          >
-            {/* Render output lines */}
-            {runOutput.split('\n').map((line, i) => (
-              <div key={i} style={{ whiteSpace: 'pre-wrap', marginBottom: '0.25rem' }}>
-                {line}
+              gap: '16px',
+              color: '#858585',
+              fontSize: '14px'
+            }}>
+              <div style={{ fontSize: '48px' }}>📁</div>
+              <div>No file selected</div>
+              <div style={{ fontSize: '12px' }}>
+                Click a file from the sidebar to start editing
               </div>
-            ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-            {/* Input line when awaiting input */}
-            {awaitingInput && (
-              <div style={{ display: 'flex', marginTop: '0.5rem', alignItems: 'center' }}>
-                <span style={{ marginRight: '0.5rem', color: '#50fa7b', fontWeight: 'bold' }}>❯</span>
-                <input
-                  type="text"
-                  autoFocus
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#d4d4d4',
-                    fontSize: '13px',
-                    width: '100%',
-                    outline: 'none',
-                    fontFamily: 'Consolas, "Courier New", monospace'
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const input = e.target.value;
-                      handleInputSubmit(input);
-                      e.target.value = '';
-                    }
-                  }}
-                  placeholder={currentPrompt || 'Type input...'}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      
-      {/* Status Bar */}
-      <div style={{
-        padding: '0.5rem 1rem',
-        backgroundColor: '#007acc',
-        fontSize: '12px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        color: '#ffffff'
-      }}>
-        <span>
-          {awaitingInput 
-            ? 'Type your input above and press Enter' 
-            : selectedCode 
-              ? `Selected: ${selectedCode.length} chars` 
-              : 'Type "xxx [instruction]" and press Enter for instant AI code generation'}
-        </span>
-        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-          <span>
-            {hasInlinePrompts ? 'Inline prompts detected' : loadingInline ? 'Generating...' : 'Ready'}
-          </span>
-          <span>{getSaveStatusText()}</span>
-        </div>
-      </div>
+      <Terminal
+        output={output}
+        awaitingInput={awaitingInput}
+        promptMessage={promptMessage}
+        onUserInput={handleUserInput}
+        clearOutput={() => setOutput('')}
+      />
+
+      {showHTMLPreview && (
+        <HTMLPreview 
+          html={isStreaming ? streamingCode : code} 
+          onClose={() => setShowHTMLPreview(false)}
+        />
+      )}
     </div>
   );
 };

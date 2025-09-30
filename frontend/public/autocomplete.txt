@@ -1,0 +1,110 @@
+! = <!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>Document</title>\n</head>\n<body>\n  \n</body>\n</html>
+a = <a href=""></a>
+abbr = <abbr title=""></abbr>
+address = <address></address>
+area = <area shape="" coords="" href="" alt="">
+article = <article></article>
+aside = <aside></aside>
+audio = <audio src="" controls></audio>
+b = <b></b>
+base = <base href="">
+bdi = <bdi></bdi>
+bdo = <bdo dir=""></bdo>
+blockquote = <blockquote cite=""></blockquote>
+body = <body></body>
+br = <br>
+button = <button></button>
+canvas = <canvas width="" height=""></canvas>
+caption = <caption></caption>
+cite = <cite></cite>
+code = <code></code>
+col = <col>
+colgroup = <colgroup></colgroup>
+data = <data value=""></data>
+datalist = <datalist></datalist>
+dd = <dd></dd>
+del = <del></del>
+details = <details></details>
+dfn = <dfn></dfn>
+dialog = <dialog></dialog>
+div = <div></div>
+dl = <dl></dl>
+dt = <dt></dt>
+em = <em></em>
+embed = <embed src="" type="">
+fieldset = <fieldset></fieldset>
+figcaption = <figcaption></figcaption>
+figure = <figure></figure>
+footer = <footer></footer>
+form = <form action="" method=""></form>
+h1 = <h1></h1>
+h2 = <h2></h2>
+h3 = <h3></h3>
+h4 = <h4></h4>
+h5 = <h5></h5>
+h6 = <h6></h6>
+head = <head></head>
+header = <header></header>
+hr = <hr>
+html = <html lang="en"></html>
+i = <i></i>
+iframe = <iframe src="" title=""></iframe>
+img = <img src="" alt="">
+input = <input type="">
+ins = <ins></ins>
+kbd = <kbd></kbd>
+label = <label for=""></label>
+legend = <legend></legend>
+li = <li></li>
+link = <link rel="stylesheet" href="">
+main = <main></main>
+map = <map name=""></map>
+mark = <mark></mark>
+meta = <meta name="" content="">
+meter = <meter value="" min="" max=""></meter>
+nav = <nav></nav>
+noscript = <noscript></noscript>
+object = <object data="" type=""></object>
+ol = <ol></ol>
+optgroup = <optgroup label=""></optgroup>
+option = <option value=""></option>
+output = <output></output>
+p = <p></p>
+param = <param name="" value="">
+picture = <picture></picture>
+pre = <pre></pre>
+progress = <progress value="" max=""></progress>
+q = <q cite=""></q>
+rp = <rp></rp>
+rt = <rt></rt>
+ruby = <ruby></ruby>
+s = <s></s>
+samp = <samp></samp>
+script = <script></script>
+section = <section></section>
+select = <select></select>
+small = <small></small>
+source = <source src="" type="">
+span = <span></span>
+strong = <strong></strong>
+style = <style></style>
+sub = <sub></sub>
+summary = <summary></summary>
+sup = <sup></sup>
+table = <table></table>
+tbody = <tbody></tbody>
+td = <td></td>
+template = <template></template>
+textarea = <textarea></textarea>
+tfoot = <tfoot></tfoot>
+th = <th></th>
+thead = <thead></thead>
+time = <time datetime=""></time>
+title = <title></title>
+tr = <tr></tr>
+track = <track kind="" src="" srclang="" label="">
+u = <u></u>
+ul = <ul></ul>
+var = <var></var>
+video = <video src="" controls></video>
+wbr = <wbr>

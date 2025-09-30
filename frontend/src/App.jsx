@@ -1,7 +1,6 @@
 // src/App.jsx
 import React, { useState, useEffect } from 'react';
 import AICompiler from './components/AICompiler';
-import Sidebar from './components/Sidebar';
 
 const App = () => {
   const [currentFile, setCurrentFile] = useState(null);
@@ -29,12 +28,7 @@ const App = () => {
       backgroundColor: '#1a1a1a',
       overflow: 'hidden'
     }}>
-      {/* Sidebar */}
-      <Sidebar 
-        onFileSelect={handleFileSelect}
-        currentCode={code}
-        currentFile={currentFile}
-      />
+    
       
       {/* Main Editor Area */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
