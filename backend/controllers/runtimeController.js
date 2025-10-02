@@ -1,4 +1,5 @@
 // controllers/runtimeController.js
+const path = require('path');
 
 const runJS = async (req, res) => {
   let responseSent = false;
@@ -7,25 +8,26 @@ const runJS = async (req, res) => {
     const { code, userInput = [] } = req.body;
 
     if (!code || typeof code !== 'string') {
-      return res.status(400).json({ output: '// No valid code provided' });
+      return res.status(400).json({ output: ['// No valid code provided'] });
     }
 
     let output = [];
     let inputIndex = 0;
+    let currentPath = '/'; // start at root
 
     const sendResponse = () => {
       if (responseSent) return;
       responseSent = true;
 
-      const finalOutput = output.join('\n');
       const hasPrompt = output.some(l => l.startsWith('[PROMPT]'));
       const needsInput = inputIndex >= userInput.length && hasPrompt;
       const lastPrompt = output.filter(l => l.startsWith('[PROMPT] ')).pop();
 
       res.json({
-        output: finalOutput,
+        output, // array of lines
         requiresInput: needsInput,
-        promptMessage: needsInput ? lastPrompt?.replace('[PROMPT] ', '') : null
+        promptMessage: needsInput ? lastPrompt?.replace('[PROMPT] ', '') : null,
+        currentPath
       });
     };
 
@@ -80,11 +82,24 @@ const runJS = async (req, res) => {
       setInterval: (fn, ms) => setInterval(fn, Math.max(ms, 100)),
       Math, Date, JSON, Array, Object, String, Number, Boolean,
       RegExp, Error, parseInt, parseFloat, isNaN, isFinite,
-      encodeURIComponent, decodeURIComponent
+      encodeURIComponent, decodeURIComponent,
+      __currentPath: currentPath, // internal path for cd
+      cd: (folder) => {
+        if (folder === '..') {
+          __currentPath = path.dirname(__currentPath);
+        } else if (folder.startsWith('/')) {
+          __currentPath = folder; // absolute
+        } else {
+          __currentPath = path.join(__currentPath, folder);
+        }
+        currentPath = __currentPath;
+        output.push(`Changed directory → ${currentPath}`);
+      },
+      pwd: () => currentPath
     };
 
     const cleanCode = code.replace(/^\uFEFF/, '').trim();
-    if (!cleanCode) return res.json({ output: '// Empty code' });
+    if (!cleanCode) return res.json({ output: ['// Empty code'] });
 
     const wrappedCode = `
       (async function() {
@@ -112,7 +127,7 @@ const runJS = async (req, res) => {
   } catch (err) {
     console.error('❌ JS Execution Error:', err);
     if (!responseSent) {
-      res.json({ output: `Runtime Error: ${err.message || 'Unknown error'}` });
+      res.json({ output: [`Runtime Error: ${err.message || 'Unknown error'}`] });
     }
   }
 };

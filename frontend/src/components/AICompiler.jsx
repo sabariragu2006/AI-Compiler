@@ -9,6 +9,7 @@ import debounce from 'lodash.debounce';
 
 const AICompiler = () => {
   const [code, setCode] = useState('');
+  const [autoSave, setAutoSave] = useState(true);
   const [fileType, setFileType] = useState('js');
   const [output, setOutput] = useState('');
   const [model, setModel] = useState('qwen');
@@ -18,6 +19,7 @@ const AICompiler = () => {
   const [loadingInline, setLoadingInline] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('checking');
   const [currentFileName, setCurrentFileName] = useState('');
+  const [currentFilePath, setCurrentFilePath] = useState(''); // Store full path
   const [userInputQueue, setUserInputQueue] = useState([]);
   const [awaitingInput, setAwaitingInput] = useState(false);
   const [promptMessage, setPromptMessage] = useState('');
@@ -25,8 +27,7 @@ const AICompiler = () => {
   const [isStreaming, setIsStreaming] = useState(false);
   const [showHTMLPreview, setShowHTMLPreview] = useState(false);
   const [openFiles, setOpenFiles] = useState([]);
-const [htmlContent, setHtmlContent] = useState('');
-
+  const [htmlContent, setHtmlContent] = useState('');
 
   const editorRef = useRef(null);
   const API_URL = 'http://localhost:5000';
@@ -48,84 +49,120 @@ const [htmlContent, setHtmlContent] = useState('');
   }, []);
 
   // =============== AUTO-SAVE ===============
- const debouncedAutoSave = useRef(
-  debounce(async (content) => {
-    if (!currentFileName || content === undefined || isStreaming) {
-      console.warn('🚫 Skip auto-save:', { currentFileName, content, isStreaming });
-      return;
-    }
-    try {
-      console.log('💾 Auto-saving:', currentFileName, 'Content length:', content.length);
-      const res = await fetch(`${API_URL}/api/files`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: currentFileName, content })
-      });
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
+  const debouncedAutoSave = useRef(
+    debounce(async (content, filePath, shouldAutoSave) => {
+      if (!shouldAutoSave || !filePath || content === undefined) {
+        return;
       }
-      console.log('✅ Auto-saved:', currentFileName);
-    } catch (err) {
-      console.error('⚠️ Auto-save failed for', currentFileName, err);
-    }
-  }, 1000)
-);
+      try {
+        const pathParts = filePath.split('/');
+        const fileName = pathParts.pop();
+        const parentPath = pathParts.join('/');
+
+        const res = await fetch(`${API_URL}/api/files`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: fileName, content, path: parentPath, type: 'file' })
+        });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        console.log('✅ Auto-saved:', filePath);
+      } catch (err) {
+        console.error('⚠️ Auto-save failed for', filePath, err);
+      }
+    }, 1000)
+  ).current;
 
   // =============== FILE OPERATIONS ===============
   const handleSaveFile = async (fileName) => {
+    const finalPath = currentFilePath || fileName;
+    if (!finalPath) {
+      setOutput(prev => prev + "⚠️ Cannot save: No file path provided\n");
+      return false;
+    }
+
+    try {
+      const pathParts = finalPath.split('/');
+      const name = pathParts.pop();
+      const parentPath = pathParts.join('/');
+
+      const res = await fetch(`${API_URL}/api/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, content: code, path: parentPath, type: 'file' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setOutput(prev => prev + `✅ File saved: ${finalPath}\n`);
+        return true;
+      } else {
+        setOutput(prev => prev + `❌ Failed to save file\n`);
+        return false;
+      }
+    } catch (err) {
+      setOutput(prev => prev + `⚠️ Error saving file: ${err.message}\n`);
+      return false;
+    }
+  };
+
+  const handleNewFolder = async () => {
+    const folderName = prompt('Enter folder name:');
+    if (!folderName) return;
+
     try {
       const res = await fetch(`${API_URL}/api/files`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: fileName, content: code })
+        body: JSON.stringify({ name: folderName, type: 'folder', path: '' })
       });
       const data = await res.json();
       if (data.success) {
-        setOutput(prev => prev + `File saved: ${fileName}\n`);
-        return true;
+        setOutput(prev => prev + `📁 Folder created: ${folderName}\n`);
       }
-      setOutput(prev => prev + `Failed to save file\n`);
-      return false;
     } catch (err) {
-      setOutput(prev => prev + `Error saving file: ${err.message}\n`);
-      return false;
+      setOutput(prev => prev + `⚠️ Error creating folder: ${err.message}\n`);
     }
   };
 
-  // Called by FileManager (with content) and loadFileByName
-  const handleLoadFile = async (fileName, content) => {
-    setCode(content);
-    setCurrentFileName(fileName);
-    setOutput(prev => prev + `Loaded: ${fileName}\n`);
+  const handleNewFile = async () => {
+    const fileName = prompt('Enter new file name (with extension, e.g., test.js):');
+    if (!fileName || fileName.trim() === '') return;
 
-    if (!openFiles.includes(fileName)) {
-      setOpenFiles(prev => [...prev, fileName]);
-    }
-
-    const extension = fileName.split('.').pop().toLowerCase();
-    if (extension === 'html' || extension === 'htm') {
-      setFileType('html');
-    } else {
-      setFileType('javascript');
-    }
-  };
-
-  const handleDeleteFile = async (fileName) => {
     try {
-      const res = await fetch(`${API_URL}/api/files/${fileName}`, {
+      const res = await fetch(`${API_URL}/api/files`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: fileName, content: '', type: 'file', path: '' })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setOutput(prev => prev + `✅ File created: ${fileName}\n`);
+      } else {
+        setOutput(prev => prev + `❌ Failed to create file: ${data.error || 'Unknown'}\n`);
+      }
+    } catch (err) {
+      setOutput(prev => prev + `⚠️ Error creating file: ${err.message}\n`);
+    }
+  };
+
+  const handleDeleteFile = async (filePath) => {
+    try {
+      const res = await fetch(`${API_URL}/api/files/${filePath}`, {
         method: 'DELETE'
       });
       const data = await res.json();
       if (data.success) {
-        setOutput(prev => prev + `Deleted: ${fileName}\n`);
-        setOpenFiles(prev => prev.filter(f => f !== fileName));
-        if (currentFileName === fileName) {
-          const remaining = openFiles.filter(f => f !== fileName);
+        setOutput(prev => prev + `Deleted: ${filePath}\n`);
+        setOpenFiles(prev => prev.filter(f => f.path !== filePath));
+        if (currentFilePath === filePath) {
+          const remaining = openFiles.filter(f => f.path !== filePath);
           if (remaining.length > 0) {
-            loadFileByName(remaining[0]);
+            loadFileByPath(remaining[0].path);
           } else {
             setCurrentFileName('');
+            setCurrentFilePath('');
             setCode('');
           }
         }
@@ -139,40 +176,62 @@ const [htmlContent, setHtmlContent] = useState('');
     }
   };
 
-  // =============== LOAD FILE BY NAME (for tabs) ===============
-  const loadFileByName = async (fileName) => {
-    if (currentFileName === fileName) return;
+  // =============== LOAD FILE BY PATH ===============
+  const loadFileByPath = async (filePath) => {
+    if (currentFilePath === filePath) return;
     try {
-      const res = await fetch(`${API_URL}/api/files/${fileName}`);
+      const res = await fetch(`${API_URL}/api/files/${filePath}`);
       if (!res.ok) throw new Error('File not found');
       const data = await res.json();
-      handleLoadFile(fileName, data.content);
+      
+      const fileName = filePath.split('/').pop();
+      handleLoadFile(fileName, data.content, filePath);
     } catch (err) {
-      setOutput(prev => prev + `Error loading ${fileName}: ${err.message}\n`);
+      setOutput(prev => prev + `Error loading ${filePath}: ${err.message}\n`);
     }
   };
 
-  const handleCloseTab = (fileName, e) => {
+  const handleCloseTab = (filePath, e) => {
     e.stopPropagation();
-    setOpenFiles(prev => prev.filter(f => f !== fileName));
-    if (currentFileName === fileName) {
-      const remaining = openFiles.filter(f => f !== fileName);
+    setOpenFiles(prev => prev.filter(f => f.path !== filePath));
+    if (currentFilePath === filePath) {
+      const remaining = openFiles.filter(f => f.path !== filePath);
       if (remaining.length > 0) {
-        loadFileByName(remaining[0]);
+        loadFileByPath(remaining[0].path);
       } else {
         setCurrentFileName('');
+        setCurrentFilePath('');
         setCode('');
       }
     }
   };
 
-  // =============== CODE CHANGE HANDLER ===============
   const handleCodeChange = (newCode) => {
     setCode(newCode);
-    if (currentFileName && !isStreaming) {
-      debouncedAutoSave.current(newCode);
+    if (autoSave && currentFilePath && !isStreaming) {
+      debouncedAutoSave(newCode, currentFilePath, autoSave);
     }
   };
+
+  // Called by FileManager when a file is clicked
+  const handleLoadFile = (fileName, content, fullPath) => {
+    setCurrentFileName(fileName);
+    setCurrentFilePath(fullPath);
+    setCode(content || '');
+    
+    // Add to open files if not already there
+    if (!openFiles.find(f => f.path === fullPath)) {
+      setOpenFiles(prev => [...prev, { name: fileName, path: fullPath }]);
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (debouncedAutoSave.cancel) {
+        debouncedAutoSave.cancel();
+      }
+    };
+  }, []);
 
   // =============== AI & RUN HANDLERS ===============
   const handleInlineExecution = async (lineIndex, instruction) => {
@@ -250,43 +309,42 @@ const [htmlContent, setHtmlContent] = useState('');
     setLoadingInline(false);
   };
 
- const handleRun = async () => {
-  if (fileType === 'html') {
-    setHtmlContent(code);           // ← set HTML code here
-    setShowHTMLPreview(true);       // ← show the preview
-    setOutput(prev => prev + '\n--- HTML Preview Opened ---\n');
-    return;
-  }
-
-  setLoadingRun(true);
-  setOutput(prev => prev + '\n--- Running Code ---\n');
-
-  try {
-    const res = await fetch(`${API_URL}/api/run-js`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code, userInput: userInputQueue })
-    });
-
-    const data = await res.json();
-
-    setOutput(prev => prev + data.output + '\n');
-
-    if (data.requiresInput && data.promptMessage) {
-      setAwaitingInput(true);
-      setPromptMessage(data.promptMessage);
-    } else {
-      setAwaitingInput(false);
-      setUserInputQueue([]);
+  const handleRun = async () => {
+    if (fileType === 'html') {
+      setHtmlContent(code);
+      setShowHTMLPreview(true);
+      setOutput(prev => prev + '\n--- HTML Preview Opened ---\n');
+      return;
     }
-  } catch (err) {
-    setOutput(prev => prev + `Error: ${err.message}\n`);
-  }
 
-  setLoadingRun(false);
-};
+    if (fileType === 'javascript' || fileType === 'js') {
+      try {
+        setLoadingRun(true);
+        const res = await fetch(`${API_URL}/api/run-js`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, userInput: userInputQueue }),
+        });
+        const data = await res.json();
+        setOutput(prev => prev + (data.output || '') + '\n');
 
+        if (data.requiresInput && data.promptMessage) {
+          setAwaitingInput(true);
+          setPromptMessage(data.promptMessage);
+        } else {
+          setAwaitingInput(false);
+          setPromptMessage('');
+        }
+      } catch (err) {
+        setOutput(prev => prev + `\n[ERROR] ${err.message}\n`);
+      } finally {
+        setLoadingRun(false);
+      }
+      return;
+    }
 
+    setOutput(prev => prev + `\n[INFO] Run not supported for ${fileType}\n`);
+  };
 
   const handleAIFix = async () => {
     const selection = editorRef.current?.getModel()?.getValueInRange(editorRef.current.getSelection());
@@ -433,8 +491,25 @@ const [htmlContent, setHtmlContent] = useState('');
     setCode('');
     setOutput('');
     setCurrentFileName('');
+    setCurrentFilePath('');
     setOpenFiles([]);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'F5') {
+        e.preventDefault();
+        handleRun();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleAIFix();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleRun, handleAIFix]);
 
   const hasInlinePrompts = code.includes('xxx ');
   const canUseAI = code.trim().length > 0;
@@ -451,13 +526,14 @@ const [htmlContent, setHtmlContent] = useState('');
       <div style={{ padding: '16px', borderBottom: '1px solid #333' }}>
         <Navbar
           onRun={handleRun}
-            onHTMLFileClick={() => handleRun()} // triggers HTML preview when HTML file is selected
+          onHTMLFileClick={handleRun}
           onAIFix={handleAIFix}
           onProcessInline={handleProcessInline}
           onClear={() => { 
             setCode(''); 
             setOutput(''); 
             setCurrentFileName(''); 
+            setCurrentFilePath('');
             setAwaitingInput(false);
             setUserInputQueue([]);
             setStreamingCode('');
@@ -478,10 +554,16 @@ const [htmlContent, setHtmlContent] = useState('');
           hasInlinePrompts={hasInlinePrompts}
           awaitingInput={awaitingInput}
           connectionStatus={connectionStatus}
+          onNewFile={handleNewFile}
+          onNewFolder={handleNewFolder}
+          onSaveFile={handleSaveFile}
+          onDeleteFile={handleDeleteFile}
+          onFileTypeChange={handleSaveFile}
+          autoSave={autoSave}
+          setAutoSave={setAutoSave}
+          currentFileName={currentFileName}
           fileType={fileType}
-          onFileTypeChange={handleFileTypeChange}
-          isStreaming={isStreaming}
-          onStopStreaming={handleStopStreaming}
+          setFileType={setFileType}
         />
       </div>
 
@@ -519,12 +601,16 @@ const [htmlContent, setHtmlContent] = useState('');
           onLoad={handleLoadFile}
           onSave={handleSaveFile}
           onDelete={handleDeleteFile}
+          onNewFolder={handleNewFolder}
           currentFileName={currentFileName}
           setCurrentFileName={setCurrentFileName}
           fileType={fileType}
           setFileType={setFileType}
+          onSaveFile={handleSaveFile}
+          onLoadFile={handleLoadFile}
         />
-        
+
+
         <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
           {openFiles.length > 0 && (
             <div style={{
@@ -533,20 +619,20 @@ const [htmlContent, setHtmlContent] = useState('');
               borderBottom: '1px solid #3e3e42',
               overflowX: 'auto'
             }}>
-              {openFiles.map(fileName => (
+              {openFiles.map(file => (
                 <div
-                  key={fileName}
-                  onClick={() => loadFileByName(fileName)} // ✅ FIXED: loads content
+                  key={file.path}
+                  onClick={() => loadFileByPath(file.path)}
                   style={{
                     padding: '8px 16px',
-                    backgroundColor: currentFileName === fileName ? '#1e1e1e' : 'transparent',
+                    backgroundColor: currentFilePath === file.path ? '#1e1e1e' : 'transparent',
                     borderRight: '1px solid #3e3e42',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '8px',
                     fontSize: '13px',
-                    color: currentFileName === fileName ? '#cccccc' : '#858585',
+                    color: currentFilePath === file.path ? '#cccccc' : '#858585',
                     minWidth: '120px',
                     maxWidth: '200px'
                   }}
@@ -557,10 +643,10 @@ const [htmlContent, setHtmlContent] = useState('');
                     whiteSpace: 'nowrap',
                     flex: 1
                   }}>
-                    {fileName}
+                    {file.name}
                   </span>
                   <button
-                    onClick={(e) => handleCloseTab(fileName, e)}
+                    onClick={(e) => handleCloseTab(file.path, e)}
                     style={{
                       padding: '2px',
                       backgroundColor: 'transparent',
@@ -585,7 +671,7 @@ const [htmlContent, setHtmlContent] = useState('');
               language={fileType === 'html' ? 'html' : 'javascript'}
               theme="vs-dark"
               value={isStreaming ? streamingCode : code}
-              onChange={isStreaming ? null : handleCodeChange} // ✅ Correct
+              onChange={isStreaming ? null : handleCodeChange}
               onMount={(editor) => { editorRef.current = editor; }}
               onEnterKey={handleInlineExecution}
               options={{
@@ -623,20 +709,21 @@ const [htmlContent, setHtmlContent] = useState('');
         promptMessage={promptMessage}
         onUserInput={handleUserInput}
         clearOutput={() => setOutput('')}
+        currentFilePath={currentFilePath}
+        handleStopStreaming={handleStopStreaming}
       />
 
-{showHTMLPreview && (
-  <HTMLPreview 
-    fileName={currentFileName} 
-    html={htmlContent}          // ← pass the actual HTML code
-    onClose={() => setShowHTMLPreview(false)} 
-  />
-)}
-
-
-
+      {showHTMLPreview && (
+        <HTMLPreview 
+          fileName={currentFileName} 
+          html={htmlContent}
+          path={currentFilePath}
+          onClose={() => setShowHTMLPreview(false)} 
+        />
+      )}
     </div>
   );
 };
+
 
 export default AICompiler;

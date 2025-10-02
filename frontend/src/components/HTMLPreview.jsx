@@ -7,7 +7,7 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
   const [error, setError] = useState(null);
   const [processedHtml, setProcessedHtml] = useState('');
 
-  // Process HTML to inject base URL and rewrite asset paths
+  // Process HTML to rewrite asset paths
   useEffect(() => {
     if (!html) {
       setProcessedHtml('');
@@ -15,50 +15,39 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
     }
 
     try {
-      // Parse and rewrite asset references to point to backend
       let modified = html;
 
-      // Rewrite <script src="..."> tags
+      // Rewrite <script src="...">
       modified = modified.replace(
         /<script\s+([^>]*\s+)?src=["']([^"']+)["']/gi,
         (match, attrs, src) => {
-          // Skip external URLs (http://, https://, //)
-          if (/^(https?:)?\/\//i.test(src)) {
-            return match;
-          }
-          // Rewrite local paths to use asset endpoint
+          if (/^(https?:)?\/\//i.test(src)) return match;
           const assetPath = `${apiUrl}/api/assets/${encodeURIComponent(src)}`;
           return `<script ${attrs || ''}src="${assetPath}"`;
         }
       );
 
-      // Rewrite <link href="..."> tags (stylesheets)
+      // Rewrite <link href="...">
       modified = modified.replace(
         /<link\s+([^>]*\s+)?href=["']([^"']+)["']/gi,
         (match, attrs, href) => {
-          // Skip external URLs
-          if (/^(https?:)?\/\//i.test(href)) {
-            return match;
-          }
-          // Rewrite local paths
+          if (/^(https?:)?\/\//i.test(href)) return match;
           const assetPath = `${apiUrl}/api/assets/${encodeURIComponent(href)}`;
           return `<link ${attrs || ''}href="${assetPath}"`;
         }
       );
 
-      // Rewrite <img src="..."> tags
+      // Rewrite <img src="...">
       modified = modified.replace(
         /<img\s+([^>]*\s+)?src=["']([^"']+)["']/gi,
         (match, attrs, src) => {
-          if (/^(https?:)?\/\//i.test(src)) {
-            return match;
-          }
+          if (/^(https?:)?\/\//i.test(src)) return match;
           const assetPath = `${apiUrl}/api/assets/${encodeURIComponent(src)}`;
           return `<img ${attrs || ''}src="${assetPath}"`;
         }
       );
 
-      // Add base tag if not present to help with relative URLs
+      // Add <base> if missing
       if (!/<base\s+href/i.test(modified)) {
         modified = modified.replace(
           /<head(\s[^>]*)?\s*>/i,
@@ -70,11 +59,11 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
       setError(null);
     } catch (err) {
       setError(`Failed to process HTML: ${err.message}`);
-      setProcessedHtml(html); // Fallback to original
+      setProcessedHtml(html);
     }
   }, [html, apiUrl]);
 
-  // Inject processed HTML into iframe
+  // Inject HTML into iframe
   useEffect(() => {
     if (!iframeRef.current || !processedHtml) return;
 
@@ -83,7 +72,7 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
 
     const iframe = iframeRef.current;
     const doc = iframe.contentDocument || iframe.contentWindow?.document;
-    
+
     if (!doc) {
       setError('Unable to access iframe document');
       setLoading(false);
@@ -95,13 +84,8 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
       doc.write(processedHtml);
       doc.close();
 
-      // Handle load event
-      const handleLoad = () => {
-        setLoading(false);
-      };
-
-      const handleError = (e) => {
-        console.error('Iframe error:', e);
+      const handleLoad = () => setLoading(false);
+      const handleError = () => {
         setError('Failed to load preview');
         setLoading(false);
       };
@@ -109,7 +93,6 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
       iframe.addEventListener('load', handleLoad);
       iframe.addEventListener('error', handleError);
 
-      // Cleanup
       return () => {
         iframe.removeEventListener('load', handleLoad);
         iframe.removeEventListener('error', handleError);
@@ -172,26 +155,22 @@ const HTMLPreview = ({ fileName, html, onClose, apiUrl = 'http://localhost:5000'
           alignItems: 'center'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ 
-              color: '#cccccc', 
-              fontSize: '14px', 
+            <span style={{
+              color: '#cccccc',
+              fontSize: '14px',
               fontWeight: '500',
               display: 'flex',
               alignItems: 'center',
               gap: '8px'
             }}>
-              <span style={{ 
-                width: '8px', 
-                height: '8px', 
-                borderRadius: '50%', 
-                backgroundColor: '#4ec9b0' 
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                backgroundColor: '#4ec9b0'
               }} />
               HTML Preview
-              {fileName && (
-                <span style={{ color: '#858585', fontSize: '13px' }}>
-                  — {fileName}
-                </span>
-              )}
+              {fileName && <span style={{ color: '#858585', fontSize: '13px' }}>— {fileName}</span>}
             </span>
           </div>
 

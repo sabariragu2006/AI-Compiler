@@ -1,12 +1,13 @@
+import React, { useState, useRef, useEffect } from 'react';
 import { Terminal as TerminalIcon, ChevronUp, ChevronDown } from 'lucide-react';
-import React, { useState, useRef, useEffect } from 'react'; 
 
-// ==================== TERMINAL COMPONENT ====================
-const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutput }) => {
+const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutput, currentFilePath }) => {
   const [inputValue, setInputValue] = useState('');
   const [isExpanded, setIsExpanded] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(250);
   const [isResizing, setIsResizing] = useState(false);
+  const [commandHistory, setCommandHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const outputRef = useRef(null);
 
   useEffect(() => {
@@ -20,9 +21,31 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
       e.preventDefault();
       e.stopPropagation();
       const value = inputValue;
+      
+      // Add to command history
+      setCommandHistory(prev => [...prev, value]);
+      setHistoryIndex(-1);
       setInputValue('');
+      
       // Use setTimeout to ensure state is cleared before callback
       setTimeout(() => onUserInput(value), 0);
+    }
+
+    // Navigate command history with Arrow Up/Down
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (commandHistory.length === 0) return;
+      const newIndex = historyIndex === -1 ? commandHistory.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(newIndex);
+      setInputValue(commandHistory[newIndex]);
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (commandHistory.length === 0) return;
+      const newIndex = historyIndex === -1 ? -1 : Math.min(commandHistory.length - 1, historyIndex + 1);
+      setHistoryIndex(newIndex);
+      setInputValue(newIndex === -1 ? '' : commandHistory[newIndex]);
     }
   };
 
@@ -93,17 +116,25 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
           justifyContent: 'space-between',
           alignItems: 'center',
           backgroundColor: '#1a1a1a',
-          cursor: 'ns-resize'
+          cursor: isResizing ? 'ns-resize' : 'default'
         }}
         onMouseDown={handleMouseDown}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <TerminalIcon size={16} />
-          <span>Output / Terminal</span>
+          <span>Terminal</span>
+          {currentFilePath && (
+            <span style={{ color: '#858585', fontSize: '12px' }}>
+              [{currentFilePath}]
+            </span>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button
-            onClick={clearOutput}
+            onClick={(e) => {
+              e.stopPropagation();
+              clearOutput && clearOutput();
+            }}
             style={{
               padding: '4px 8px',
               backgroundColor: '#555',
@@ -158,7 +189,7 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
             flex: awaitingInput ? '0 1 auto' : '1'
           }}
         >
-          {output || '// Output will appear here\n// Press Enter on any "xxx [instruction]" line to generate code\n// Use Ctrl+Enter to run your JavaScript code'}
+          {output || '// Output will appear here\n// Press Ctrl+Enter to run your JavaScript code'}
         </pre>
 
         {awaitingInput && (
@@ -168,13 +199,15 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
             gap: '4px',
             marginTop: '8px'
           }}>
-            <span style={{ color: '#ffa500' }}>{'> '}</span>
+            <span style={{ color: '#ffa500' }}>
+              {currentFilePath ? `${currentFilePath} > ` : '> '}
+            </span>
             <input
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleInputSubmit}
-              placeholder=""
+              placeholder={promptMessage || ''}
               autoFocus
               style={{
                 flex: 1,

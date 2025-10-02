@@ -20,25 +20,35 @@ const compile = async (req, res, next) => {
     const ollamaModel = model === 'deepseek' ? 'deepseek-coder:6.7b' : 'qwen2.5-coder:7b';
 
     let userPrompt;
-    if (codeType === 'html') {
-      userPrompt = isInlinePrompt
-        ? `Generate clean HTML code for: ${prompt}`
-        : code && prompt
-        ? `Improve this HTML code:\n\n${code}\n\nInstruction: ${prompt}`
-        : code
-        ? `Fix this HTML code:\n\n${code}`
-        : `Generate HTML code for: ${prompt}`;
-      userPrompt += '\n\nRespond with ONLY valid HTML code. No explanations or comments.';
-    } else {
-      userPrompt = isInlinePrompt
-        ? `Generate JavaScript code for: ${prompt}`
-        : code && prompt
-        ? `Improve this JavaScript code:\n\n${code}\n\nInstruction: ${prompt}`
-        : code
-        ? `Fix this JavaScript code:\n\n${code}`
-        : `Generate JavaScript code for: ${prompt}`;
-      userPrompt += '\n\nRespond with ONLY valid JavaScript code.';
-    }
+
+if (codeType === 'html') {
+  userPrompt = isInlinePrompt
+    ? `Generate ONLY clean HTML code for: ${prompt}. Do NOT include CSS, JS, or explanations unless the prompt explicitly requests them.`
+    : code && prompt
+    ? `Improve this HTML code:\n\n${code}\n\nInstruction: ${prompt}\n\nRespond with ONLY valid HTML. Do NOT include CSS or JS unless asked.`
+    : code
+    ? `Fix this HTML code:\n\n${code}\n\nRespond with ONLY valid HTML.`
+    : `Generate HTML code for: ${prompt}\n\nRespond with ONLY HTML. No CSS, no JS, no comments.`;
+
+} else if (codeType === 'css') {
+  userPrompt = isInlinePrompt
+    ? `Generate ONLY CSS for: ${prompt}. Do NOT include HTML, JS, or explanations unless explicitly requested.`
+    : code && prompt
+    ? `Improve this CSS code:\n\n${code}\n\nInstruction: ${prompt}\n\nRespond with ONLY valid CSS. Do NOT include HTML or JS.`
+    : code
+    ? `Fix this CSS code:\n\n${code}\n\nRespond with ONLY valid CSS.`
+    : `Generate CSS for: ${prompt}\n\nRespond with ONLY CSS. No HTML, no JS, no comments.`;
+
+} else {
+  userPrompt = isInlinePrompt
+    ? `Generate ONLY JavaScript for: ${prompt}. Do NOT include HTML, CSS, or explanations unless explicitly requested.`
+    : code && prompt
+    ? `Improve this JavaScript code:\n\n${code}\n\nInstruction: ${prompt}\n\nRespond with ONLY valid JavaScript. Do NOT include HTML or CSS.`
+    : code
+    ? `Fix this JavaScript code:\n\n${code}\n\nRespond with ONLY valid JavaScript.`
+    : `Generate JavaScript code for: ${prompt}\n\nRespond with ONLY JavaScript. No HTML, no CSS, no comments.`;
+}
+
 
     // Check Ollama availability
     try {
@@ -60,6 +70,7 @@ const compile = async (req, res, next) => {
   }
 };
 
+
 // -------------------- AI Streaming --------------------
 const compileStreaming = async (req, res, next) => {
   try {
@@ -68,9 +79,15 @@ const compileStreaming = async (req, res, next) => {
 
     const ollamaModel = model === 'deepseek' ? 'deepseek-coder:6.7b' : 'qwen2.5-coder:7b';
 
-    let userPrompt = codeType === 'html'
-      ? `Generate HTML for: ${prompt || code}`
-      : `Generate JS for: ${prompt || code}`;
+let userPrompt;
+if (codeType === 'html') {
+  userPrompt = `Generate HTML for: ${prompt || code}`;
+} else if (codeType === 'css') {
+  userPrompt = `Generate CSS for: ${prompt || code}`;
+} else {
+  userPrompt = `Generate JS for: ${prompt || code}`;
+}
+
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',

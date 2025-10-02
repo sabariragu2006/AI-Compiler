@@ -14,12 +14,14 @@ const { validateModel } = require('../middleware/validateModel');
 // -------- FILE ROUTES --------
 router.post('/api/files', fileController.saveFile);
 router.get('/api/files', fileController.getFiles);
-router.get('/api/files/:name', fileController.getFile);
-router.delete('/api/files/:name', fileController.deleteFile);
+
+// Use wildcard (*) for nested paths
+router.get('/api/files/*', fileController.getFile);
+router.delete('/api/files/*', fileController.deleteFile);
 
 // New: HTML preview + asset serving
-router.get('/api/preview/:name', fileController.previewFile);
-router.get('/api/assets/:name', fileController.serveAsset);
+router.get('/api/preview/*', fileController.previewFile);
+router.get('/api/assets/*', fileController.serveAsset);
 
 // -------- AI ROUTES --------
 router.post('/api/compile-streaming', aiController.compileStreaming);

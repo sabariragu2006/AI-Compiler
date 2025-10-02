@@ -5,42 +5,41 @@ function extractCodeFromAI(aiResponse, codeType = 'javascript') {
 
   let code = aiResponse;
 
-  const codeBlockRegex = codeType === 'html'
-    ? /```(?:html|xml)?\s*([\s\S]*?)\s*```/gi
-    : /```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/gi;
+  // Remove any <think> sections or explanations
+  code = code.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
-  const matches = [...aiResponse.matchAll(codeBlockRegex)];
+  // Regex to capture ONLY the requested language
+  const regexMap = {
+    javascript: /```(?:javascript|js|typescript|ts)?\s*([\s\S]*?)\s*```/gi,
+    html: /```(?:html|xml)?\s*([\s\S]*?)\s*```/gi,
+    css: /```(?:css)?\s*([\s\S]*?)\s*```/gi,
+  };
+
+  const matches = [...code.matchAll(regexMap[codeType])];
   if (matches.length > 0) {
-    code = matches.map(match => match[1]).join('\n\n');
+    return matches.map(m => m[1]).join('\n').trim();
   }
 
-  code = code.replace(/^```[\s\S]*?```$/gm, '');
-  code = code.replace(/^```/gm, '').replace(/```$/gm, '');
+  // If no fenced block found, fallback to raw (but strip cross-language stuff)
+  if (codeType === 'html') {
+    return code.replace(/<style[\s\S]*?<\/style>/gi, '')
+               .replace(/<script[\s\S]*?<\/script>/gi, '')
+               .trim();
+  }
+  if (codeType === 'css') {
+    return code.replace(/<\/?[^>]+(>|$)/g, '') // strip HTML tags
+               .replace(/function|const|let|var/g, '') // rough remove JS
+               .trim();
+  }
+  if (codeType === 'javascript') {
+    return code.replace(/<\/?[^>]+(>|$)/g, '') // strip HTML
+               .replace(/[\w-]+\s*{[^}]*}/g, '') // strip CSS blocks
+               .trim();
+  }
 
-  const lines = code.split('\n').filter(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return true;
-
-    const nonCodePatterns = [
-      /^(here's|sure|note|explanation|comment|output|result|answer|response|generated|created|updated|fixed|improved|the following|below is|this is|i have|here is)/i,
-      /^(\/\/|\/\*|<!--)\s*(here's|sure|note|explanation|comment|output|result|answer|response|generated|created|updated|fixed|improved|the following|below is|this is|i have|here is)/i,
-      /^ai:/i,
-      /^user:/i
-    ];
-
-    return !nonCodePatterns.some(pattern => pattern.test(trimmed));
-  });
-
-  code = lines.join('\n').trim();
-
-  code = code
-    .replace(/^```[\s\S]*$/gm, '')
-    .replace(/^\s*```.*$/gm, '')
-    .replace(/^.*```\s*$/gm, '')
-    .trim();
-
-  return code;
+  return code.trim();
 }
+
 
 function parseInlinePrompts(code) {
   const lines = code.split('\n');
