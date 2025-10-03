@@ -10,35 +10,34 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
 
   const API_URL = 'http://localhost:5000';
 
+  // Helper to normalize paths (remove leading/trailing slashes)
+  const normalizePath = useCallback((p) => {
+    if (!p) return '';
+    return p.replace(/^\/+|\/+$/g, '');
+  }, []);
+
   // Build hierarchical tree from flat list
   const buildTree = useCallback((flatItems) => {
     const tree = [];
     const itemMap = {};
 
-    // Debug log
-    console.log('Building tree from items:', flatItems);
-
-    // Create map of all items
+    // Create map of all items with normalized paths
     flatItems.forEach(item => {
-      itemMap[item.path] = { ...item, children: [] };
+      const normalizedPath = normalizePath(item.path);
+      itemMap[normalizedPath] = { ...item, path: normalizedPath, children: [] };
     });
-
-    console.log('Item map:', itemMap);
 
     // Build tree structure
     flatItems.forEach(item => {
-      const pathParts = item.path.split('/').filter(p => p); // Filter empty parts
-      
-      console.log(`Processing: ${item.path}, parts:`, pathParts);
+      const normalizedPath = normalizePath(item.path);
+      const pathParts = normalizedPath.split('/').filter(p => p);
       
       if (pathParts.length === 1) {
         // Root level item
-        tree.push(itemMap[item.path]);
-        console.log(`Added to root: ${item.path}`);
+        tree.push(itemMap[normalizedPath]);
       } else {
         // Nested item - find parent
         const parentPath = pathParts.slice(0, -1).join('/');
-        console.log(`Looking for parent: ${parentPath} for ${item.path}`);
         
         if (!itemMap[parentPath]) {
           // Auto-create folder if missing
@@ -49,21 +48,17 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
             type: 'folder',
             children: []
           };
-          console.log(`Created missing parent folder: ${parentPath}`);
           
           // Add to appropriate parent or root
           const grandParentPath = pathParts.slice(0, -2).join('/');
           if (grandParentPath && itemMap[grandParentPath]) {
             itemMap[grandParentPath].children.push(itemMap[parentPath]);
-            console.log(`Added ${parentPath} to grandparent ${grandParentPath}`);
           } else {
             tree.push(itemMap[parentPath]);
-            console.log(`Added ${parentPath} to root`);
           }
         }
         
-        itemMap[parentPath].children.push(itemMap[item.path]);
-        console.log(`Added ${item.path} to parent ${parentPath}`);
+        itemMap[parentPath].children.push(itemMap[normalizedPath]);
       }
     });
 
@@ -81,9 +76,8 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
     };
     sortItems(tree);
 
-    console.log('Final tree:', tree);
     return tree;
-  }, []);
+  }, [normalizePath]);
 
   // Fetch all files and build tree
   const fetchItems = useCallback(async () => {
@@ -91,14 +85,7 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
       const res = await fetch(`${API_URL}/api/files?path=`);
       const data = await res.json();
       
-      // Debug: Log raw data from API
-      console.log('Raw API data:', data);
-      
       const treeData = buildTree(data);
-      
-      // Debug: Log built tree
-      console.log('Built tree:', treeData);
-      
       setItems(treeData);
       
       // Auto-expand all folders after fetching
@@ -112,15 +99,11 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
         });
       };
       expandAllFolders(treeData);
-      
-      // Debug: Log expanded folders
-      console.log('Expanded folders:', Array.from(newExpanded));
-      
       setExpandedFolders(newExpanded);
     } catch (err) {
       console.error('Failed to fetch items:', err);
     }
-  }, [API_URL, buildTree]);
+  }, [buildTree]);
 
   // Single useEffect for fetching - runs once on mount and sets up interval
   useEffect(() => {
@@ -142,39 +125,44 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
 
   // Load file
   const handleLoad = async (item) => {
-    if (item.type === 'folder') {
-      toggleFolder(item.path);
-      setSelectedFolder(item.path); // Track selected folder for new file/folder creation
-      return;
-    }
+  if (item.type === 'folder') {
+    toggleFolder(item.path);
+    setSelectedFolder(item.path);
+    return;
+  }
 
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/files/${item.path}`);
-      if (!res.ok) throw new Error('Failed to load file');
-      
-      const fileData = await res.json();
-      const extension = item.name.split('.').pop().toLowerCase();
-      const types = { 
-        js: 'javascript', 
-        ts: 'typescript', 
-        css: 'css', 
-        html: 'html', 
-        htm: 'html',
-        json: 'json',
-        md: 'markdown'
-      };
-      setFileType(types[extension] || 'text');
-      
-      await onLoad(item.name, fileData.content, item.path);
-      setCurrentFileName(item.name);
-    } catch (err) {
-      console.error('Failed to load file:', err);
-      alert('Failed to load file: ' + err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  try {
+    const normalizedPath2 = normalizePath(item.path); // use a different variable name if needed
+
+const res = await fetch(`${API_URL}/api/files/${encodeURIComponent(normalizedPath2)}`);
+    if (!res.ok) throw new Error('Failed to load file');
+
+    console.log(`${API_URL}/api/files/${normalizedPath2}`);
+    const fileData = await res.json();
+
+    const extension = item.name.split('.').pop().toLowerCase();
+    const types = { 
+      js: 'javascript', 
+      ts: 'typescript', 
+      css: 'css', 
+      html: 'html', 
+      htm: 'html',
+      json: 'json',
+      md: 'markdown'
+    };
+    setFileType(types[extension] || 'text');
+
+    await onLoad(item.name, fileData.content, normalizedPath2);
+    setCurrentFileName(item.name);
+  } catch (err) {
+    console.error('Failed to load file:', err);
+    alert('Failed to load file: ' + err.message);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   // Delete file/folder
   const handleDelete = async (item, e) => {
@@ -183,7 +171,8 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
     
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/files/${item.path}`, {
+      const normalizedPath = normalizePath(item.path);
+      const res = await fetch(`${API_URL}/api/files/${normalizedPath}`, {
         method: 'DELETE'
       });
       if (!res.ok) throw new Error('Failed to delete');
@@ -256,10 +245,12 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
       const hasChildren = isFolder && item.children && item.children.length > 0;
       const baseIndent = 8;
       const indentSize = 20;
-      const isSelected = currentFileName === item.name;
+      const normalizedItemPath = normalizePath(item.path);
+      const normalizedCurrentPath = normalizePath(currentFileName);
+      const isSelected = item.name === currentFileName || normalizedItemPath.endsWith('/' + currentFileName);
 
       return (
-        <div key={item.path}>
+        <div key={normalizedItemPath}>
           <div
             onClick={() => handleLoad(item)}
             style={{
@@ -345,7 +336,7 @@ const FileManager = ({ onLoad, onDelete, currentFileName, setFileType, setCurren
         </div>
       );
     });
-  }, [expandedFolders, currentFileName, loading, handleLoad]);
+  }, [expandedFolders, currentFileName, loading, handleLoad, normalizePath]);
 
   const getFileColor = (fileName) => {
     const ext = fileName.split('.').pop().toLowerCase();

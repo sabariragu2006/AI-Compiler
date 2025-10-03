@@ -1,7 +1,16 @@
+// Terminal.jsx - Updated Component with Path Highlighting
 import React, { useState, useRef, useEffect } from 'react';
 import { Terminal as TerminalIcon, ChevronUp, ChevronDown } from 'lucide-react';
 
-const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutput, currentFilePath }) => {
+const Terminal = ({ 
+  output, 
+  awaitingInput, 
+  promptMessage, 
+  onCommand,
+  clearOutput, 
+  currentFilePath,
+  fileStructure = []
+}) => {
   const [inputValue, setInputValue] = useState('');
   const [isExpanded, setIsExpanded] = useState(true);
   const [terminalHeight, setTerminalHeight] = useState(250);
@@ -9,6 +18,7 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
   const [commandHistory, setCommandHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const outputRef = useRef(null);
+  const inputRef = useRef(null);
 
   useEffect(() => {
     if (outputRef.current) {
@@ -16,22 +26,91 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
     }
   }, [output]);
 
+  const handleTerminalClick = () => {
+    if (inputRef.current) {
+      inputRef.current.focus();
+    }
+  };
+
+  // Function to highlight paths in text
+  const highlightPaths = (text) => {
+    // Match paths like /folder, /folder/subfolder, folder/file.js, etc.
+    const pathRegex = /(\/?[\w-]+(?:\/[\w.-]+)*\/?)/g;
+    const parts = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = pathRegex.exec(text)) !== null) {
+      const path = match[1];
+      
+      // Add text before the match
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {text.substring(lastIndex, match.index)}
+          </span>
+        );
+      }
+
+      // Check if it's likely a path (has / or is after certain keywords)
+      const beforeMatch = text.substring(Math.max(0, match.index - 20), match.index);
+      const isPath = path.includes('/') || 
+                     beforeMatch.includes('→') || 
+                     beforeMatch.includes('directory') ||
+                     beforeMatch.includes('cd') ||
+                     beforeMatch.includes('mkdir') ||
+                     beforeMatch.includes('path:') ||
+                     text.startsWith(path + ' $'); // Command prompt
+
+      if (isPath) {
+        parts.push(
+          <span 
+            key={`path-${match.index}`} 
+            style={{ 
+              color: '#4EC9B0', 
+              fontWeight: '600' 
+            }}
+          >
+            {path}
+          </span>
+        );
+      } else {
+        parts.push(
+          <span key={`text-${match.index}`}>{path}</span>
+        );
+      }
+
+      lastIndex = match.index + path.length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${lastIndex}`}>
+          {text.substring(lastIndex)}
+        </span>
+      );
+    }
+
+    return parts.length > 0 ? parts : text;
+  };
+
   const handleInputSubmit = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && inputValue.trim()) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       e.stopPropagation();
+      
+      if (!inputValue.trim()) return;
+      
       const value = inputValue;
       
-      // Add to command history
       setCommandHistory(prev => [...prev, value]);
       setHistoryIndex(-1);
       setInputValue('');
       
-      // Use setTimeout to ensure state is cleared before callback
-      setTimeout(() => onUserInput(value), 0);
+      setTimeout(() => onCommand(value), 0);
     }
 
-    // Navigate command history with Arrow Up/Down
     if (e.key === 'ArrowUp') {
       e.preventDefault();
       if (commandHistory.length === 0) return;
@@ -72,6 +151,46 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
     document.addEventListener('mouseup', handleMouseUp);
   };
 
+  const renderLine = (line, idx) => {
+    // Error messages
+    if (line.startsWith('ERROR:') || line.startsWith('Runtime Error:') || line.includes('not found')) {
+      return <div key={idx} style={{ color: '#f48771' }}>{highlightPaths(line)}</div>;
+    }
+    
+    // Success messages
+    if (line.startsWith('✓') || line.includes('Success') || line.startsWith('Changed directory')) {
+      return <div key={idx} style={{ color: '#89d185' }}>{highlightPaths(line)}</div>;
+    }
+    
+    // Warning messages
+    if (line.startsWith('WARN:')) {
+      return <div key={idx} style={{ color: '#cca700' }}>{highlightPaths(line)}</div>;
+    }
+    
+    // Info messages
+    if (line.startsWith('INFO:')) {
+      return <div key={idx} style={{ color: '#75beff' }}>{highlightPaths(line)}</div>;
+    }
+    
+    // Comments
+    if (line.trim().startsWith('#') || line.trim().startsWith('//')) {
+      return <div key={idx} style={{ color: '#6A9955' }}>{line}</div>;
+    }
+
+    // File/folder listings
+    if (line.startsWith('  📁') || line.startsWith('  📄')) {
+      return <div key={idx} style={{ color: '#75beff' }}>{line}</div>;
+    }
+
+    // Command prompt lines (contains $)
+    if (line.includes(' $ ')) {
+      return <div key={idx}>{highlightPaths(line)}</div>;
+    }
+    
+    // Regular output lines - still highlight paths
+    return <div key={idx}>{highlightPaths(line)}</div>;
+  };
+
   if (!isExpanded && !awaitingInput) {
     return (
       <div 
@@ -102,7 +221,7 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
         height: isExpanded ? `${terminalHeight}px` : 'auto',
         display: 'flex', 
         flexDirection: 'column',
-        backgroundColor: '#0d0d0d',
+        backgroundColor: '#1e1e1e',
         borderTop: '1px solid #3e3e42',
         transition: 'height 0.3s ease'
       }}
@@ -124,7 +243,7 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
           <TerminalIcon size={16} />
           <span>Terminal</span>
           {currentFilePath && (
-            <span style={{ color: '#858585', fontSize: '12px' }}>
+            <span style={{ color: '#4EC9B0', fontSize: '12px', fontWeight: '600' }}>
               [{currentFilePath}]
             </span>
           )}
@@ -169,59 +288,71 @@ const Terminal = ({ output, awaitingInput, promptMessage, onUserInput, clearOutp
       <div 
         style={{ 
           flex: 1, 
-          padding: '16px', 
+          padding: '12px', 
           margin: 0,
           overflow: 'auto',
-          fontFamily: 'Consolas, Monaco, monospace',
-          fontSize: '13px',
-          lineHeight: '1.6',
+          fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+          fontSize: '14px',
+          lineHeight: '1.5',
           minHeight: '0',
           display: 'flex',
-          flexDirection: 'column'
+          flexDirection: 'column',
+          color: '#cccccc',
+          cursor: 'text'
         }}
+        onClick={handleTerminalClick}
       >
-        <pre 
+        <div 
           ref={outputRef}
           style={{ 
             margin: 0,
             whiteSpace: 'pre-wrap',
             wordWrap: 'break-word',
-            flex: awaitingInput ? '0 1 auto' : '1'
+            flex: '0 1 auto'
           }}
         >
-          {output || '// Output will appear here\n// Press Ctrl+Enter to run your JavaScript code'}
-        </pre>
+          {output ? (
+            output.split('\n').map((line, idx) => renderLine(line, idx))
+          ) : (
+            <div style={{ color: '#6A9955' }}>
+              # JavaScript Runtime Terminal<br/>
+              # Commands: cd &lt;folder&gt;, cd .., pwd, ls, clear<br/>
+              # Run JavaScript code by typing it directly
+            </div>
+          )}
+        </div>
 
-        {awaitingInput && (
-          <div style={{ 
-            display: 'flex',
-            alignItems: 'center',
-            gap: '4px',
-            marginTop: '8px'
-          }}>
-            <span style={{ color: '#ffa500' }}>
-              {currentFilePath ? `${currentFilePath} > ` : '> '}
-            </span>
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={handleInputSubmit}
-              placeholder={promptMessage || ''}
-              autoFocus
-              style={{
-                flex: 1,
-                padding: '2px 4px',
-                backgroundColor: 'transparent',
-                color: '#d4d4d4',
-                border: 'none',
-                outline: 'none',
-                fontFamily: 'Consolas, Monaco, monospace',
-                fontSize: '13px'
-              }}
-            />
-          </div>
-        )}
+        {/* Always show interactive prompt */}
+        <div style={{ 
+          display: 'flex',
+          alignItems: 'center',
+          gap: '4px',
+          marginTop: output ? '8px' : '0'
+        }}>
+          <span style={{ color: '#4EC9B0', fontWeight: '600' }}>
+            {currentFilePath || '/'}
+          </span>
+          <span style={{ color: '#808080', fontWeight: '600' }}>{'>'}</span>
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={handleInputSubmit}
+            placeholder={promptMessage || (awaitingInput ? 'Enter input...' : 'Type command or code...')}
+            autoFocus
+            style={{
+              flex: 1,
+              padding: '2px 4px',
+              backgroundColor: 'transparent',
+              color: '#cccccc',
+              border: 'none',
+              outline: 'none',
+              fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+              fontSize: '14px'
+            }}
+          />
+        </div>
       </div>
       
       <div

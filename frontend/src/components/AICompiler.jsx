@@ -19,7 +19,8 @@ const AICompiler = () => {
   const [loadingInline, setLoadingInline] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState('checking');
   const [currentFileName, setCurrentFileName] = useState('');
-  const [currentFilePath, setCurrentFilePath] = useState(''); // Store full path
+  const [currentFilePath, setCurrentFilePath] = useState('');
+  const [currentTerminalPath, setCurrentTerminalPath] = useState('/');
   const [userInputQueue, setUserInputQueue] = useState([]);
   const [awaitingInput, setAwaitingInput] = useState(false);
   const [promptMessage, setPromptMessage] = useState('');
@@ -28,12 +29,19 @@ const AICompiler = () => {
   const [showHTMLPreview, setShowHTMLPreview] = useState(false);
   const [openFiles, setOpenFiles] = useState([]);
   const [htmlContent, setHtmlContent] = useState('');
+  const [fileStructure, setFileStructure] = useState([]);
 
   const editorRef = useRef(null);
   const API_URL = 'http://localhost:5000';
   const abortControllerRef = useRef(null);
 
-  // =============== CONNECTION CHECK ===============
+  // Helper to normalize paths (remove leading/trailing slashes)
+  const normalizePath = (p) => {
+    if (!p) return '';
+    return p.replace(/^\/+|\/+$/g, '');
+  };
+
+  // CONNECTION CHECK
   useEffect(() => {
     const checkConnection = async () => {
       try {
@@ -48,14 +56,33 @@ const AICompiler = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // =============== AUTO-SAVE ===============
+  // LOAD FILE STRUCTURE
+  useEffect(() => {
+    const loadFileStructure = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/files`);
+        const data = await res.json();
+        if (data.files) {
+          setFileStructure(data.files);
+        }
+      } catch (err) {
+        console.error('Error loading file structure:', err);
+      }
+    };
+    loadFileStructure();
+    const interval = setInterval(loadFileStructure, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // AUTO-SAVE
   const debouncedAutoSave = useRef(
     debounce(async (content, filePath, shouldAutoSave) => {
       if (!shouldAutoSave || !filePath || content === undefined) {
         return;
       }
       try {
-        const pathParts = filePath.split('/');
+        const normalizedPath = normalizePath(filePath);
+        const pathParts = normalizedPath.split('/');
         const fileName = pathParts.pop();
         const parentPath = pathParts.join('/');
 
@@ -74,7 +101,129 @@ const AICompiler = () => {
     }, 1000)
   ).current;
 
-  // =============== FILE OPERATIONS ===============
+  // Get items at terminal path
+  const getItemsAtPath = (path) => {
+    const normalizedPath = normalizePath(path);
+    const items = [];
+    const folders = new Set();
+
+    fileStructure.forEach(item => {
+      const itemPath = normalizePath(item.path || '');
+      const itemDir = itemPath.includes('/') 
+        ? itemPath.substring(0, itemPath.lastIndexOf('/')) 
+        : '';
+
+      if (item.type === 'folder' && itemDir === normalizedPath) {
+        folders.add(item.name);
+      } else if (item.type !== 'folder' && itemDir === normalizedPath) {
+        items.push(item);
+      }
+
+      if (itemPath.startsWith(normalizedPath) && normalizedPath !== '') {
+        const relativePath = itemPath.substring(normalizedPath.length + 1);
+        const nextSlash = relativePath.indexOf('/');
+        if (nextSlash > 0) {
+          folders.add(relativePath.substring(0, nextSlash));
+        }
+      }
+    });
+
+    return { files: items, folders: Array.from(folders) };
+  };
+
+  // TERMINAL COMMAND HANDLER
+  const handleTerminalCommand = async (input) => {
+    const trimmedInput = input.trim();
+    if (!trimmedInput) return;
+
+    setOutput(prev => `${prev}${currentTerminalPath} $ ${input}\n`);
+
+    if (trimmedInput === 'clear' || trimmedInput === 'cls') {
+      setOutput('');
+      return;
+    }
+
+    if (trimmedInput.startsWith('open ')) {
+      const fileName = trimmedInput.substring(5).trim();
+      if (!fileName) {
+        setOutput(prev => `${prev}ERROR: Please specify a file name\n`);
+        return;
+      }
+
+      const { files } = getItemsAtPath(currentTerminalPath);
+      const file = files.find(f => f.name === fileName);
+      
+      if (file) {
+        loadFileByPath(file.path);
+        setOutput(prev => `${prev}✓ Opened ${fileName} in editor\n`);
+      } else {
+        setOutput(prev => `${prev}ERROR: File '${fileName}' not found\n`);
+      }
+      return;
+    }
+
+    try {
+      setLoadingRun(true);
+
+      const res = await fetch(`${API_URL}/api/terminal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          command: trimmedInput,
+          userInput: userInputQueue,
+          currentPath: currentTerminalPath,
+          sessionId: 'user-session-1'
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setOutput(prev => `${prev}ERROR: Unexpected response from server\n`);
+        return;
+      }
+
+      const data = await res.json();
+
+      if (data.success) {
+        if (data.output && data.output.includes('[CLEAR]')) {
+          setOutput('');
+          return;
+        }
+
+        if (data.output && Array.isArray(data.output)) {
+          const outputText = data.output.join('\n');
+          if (outputText) {
+            setOutput(prev => `${prev}${outputText}\n`);
+          }
+        }
+
+        if (data.currentPath) {
+          setCurrentTerminalPath(data.currentPath);
+        }
+
+        if (data.requiresInput && data.promptMessage) {
+          setAwaitingInput(true);
+          setPromptMessage(data.promptMessage);
+        } else {
+          setAwaitingInput(false);
+          setPromptMessage('');
+        }
+      } else {
+        const errorMsg = data.output ? data.output.join('\n') : 'Command failed';
+        setOutput(prev => `${prev}${errorMsg}\n`);
+      }
+    } catch (err) {
+      setOutput(prev => `${prev}ERROR: ${err.message}\n`);
+    } finally {
+      setLoadingRun(false);
+    }
+  };
+
+  // FILE OPERATIONS
   const handleSaveFile = async (fileName) => {
     const finalPath = currentFilePath || fileName;
     if (!finalPath) {
@@ -83,7 +232,8 @@ const AICompiler = () => {
     }
 
     try {
-      const pathParts = finalPath.split('/');
+      const normalizedPath = normalizePath(finalPath);
+      const pathParts = normalizedPath.split('/');
       const name = pathParts.pop();
       const parentPath = pathParts.join('/');
 
@@ -149,15 +299,16 @@ const AICompiler = () => {
 
   const handleDeleteFile = async (filePath) => {
     try {
-      const res = await fetch(`${API_URL}/api/files/${filePath}`, {
+      const normalizedPath = normalizePath(filePath);
+      const res = await fetch(`${API_URL}/api/files/${normalizedPath}`, {
         method: 'DELETE'
       });
       const data = await res.json();
       if (data.success) {
         setOutput(prev => prev + `Deleted: ${filePath}\n`);
-        setOpenFiles(prev => prev.filter(f => f.path !== filePath));
-        if (currentFilePath === filePath) {
-          const remaining = openFiles.filter(f => f.path !== filePath);
+        setOpenFiles(prev => prev.filter(f => normalizePath(f.path) !== normalizedPath));
+        if (normalizePath(currentFilePath) === normalizedPath) {
+          const remaining = openFiles.filter(f => normalizePath(f.path) !== normalizedPath);
           if (remaining.length > 0) {
             loadFileByPath(remaining[0].path);
           } else {
@@ -176,16 +327,39 @@ const AICompiler = () => {
     }
   };
 
-  // =============== LOAD FILE BY PATH ===============
+  // LOAD TERMINAL SESSION ON MOUNT
+  useEffect(() => {
+    const loadTerminalSession = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/terminal/session?sessionId=user-session-1`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && data.currentPath) {
+            setCurrentTerminalPath(data.currentPath);
+            console.log('✅ Restored terminal session:', data.currentPath);
+          }
+        }
+      } catch (err) {
+        console.error('⚠️ Could not load terminal session:', err);
+        setCurrentTerminalPath('/');
+      }
+    };
+    
+    loadTerminalSession();
+  }, []);
+
+  // LOAD FILE BY PATH
   const loadFileByPath = async (filePath) => {
-    if (currentFilePath === filePath) return;
+    const normalizedPath = normalizePath(filePath);
+    if (normalizePath(currentFilePath) === normalizedPath) return;
+    
     try {
-      const res = await fetch(`${API_URL}/api/files/${filePath}`);
+      const res = await fetch(`${API_URL}/api/files/${normalizedPath}`);
       if (!res.ok) throw new Error('File not found');
       const data = await res.json();
       
-      const fileName = filePath.split('/').pop();
-      handleLoadFile(fileName, data.content, filePath);
+      const fileName = normalizedPath.split('/').pop();
+      handleLoadFile(fileName, data.content, normalizedPath);
     } catch (err) {
       setOutput(prev => prev + `Error loading ${filePath}: ${err.message}\n`);
     }
@@ -193,9 +367,10 @@ const AICompiler = () => {
 
   const handleCloseTab = (filePath, e) => {
     e.stopPropagation();
-    setOpenFiles(prev => prev.filter(f => f.path !== filePath));
-    if (currentFilePath === filePath) {
-      const remaining = openFiles.filter(f => f.path !== filePath);
+    const normalizedPath = normalizePath(filePath);
+    setOpenFiles(prev => prev.filter(f => normalizePath(f.path) !== normalizedPath));
+    if (normalizePath(currentFilePath) === normalizedPath) {
+      const remaining = openFiles.filter(f => normalizePath(f.path) !== normalizedPath);
       if (remaining.length > 0) {
         loadFileByPath(remaining[0].path);
       } else {
@@ -213,15 +388,14 @@ const AICompiler = () => {
     }
   };
 
-  // Called by FileManager when a file is clicked
   const handleLoadFile = (fileName, content, fullPath) => {
+    const normalizedPath = normalizePath(fullPath);
     setCurrentFileName(fileName);
-    setCurrentFilePath(fullPath);
+    setCurrentFilePath(normalizedPath);
     setCode(content || '');
     
-    // Add to open files if not already there
-    if (!openFiles.find(f => f.path === fullPath)) {
-      setOpenFiles(prev => [...prev, { name: fileName, path: fullPath }]);
+    if (!openFiles.find(f => normalizePath(f.path) === normalizedPath)) {
+      setOpenFiles(prev => [...prev, { name: fileName, path: normalizedPath }]);
     }
   };
 
@@ -233,7 +407,7 @@ const AICompiler = () => {
     };
   }, []);
 
-  // =============== AI & RUN HANDLERS ===============
+  // AI & RUN HANDLERS (keeping your existing implementation)
   const handleInlineExecution = async (lineIndex, instruction) => {
     if (loadingInline) return;
     setLoadingInline(true);
@@ -326,7 +500,12 @@ const AICompiler = () => {
           body: JSON.stringify({ code, userInput: userInputQueue }),
         });
         const data = await res.json();
-        setOutput(prev => prev + (data.output || '') + '\n');
+        
+        if (data.output && Array.isArray(data.output)) {
+          setOutput(prev => prev + data.output.join('\n') + '\n');
+        } else if (data.output) {
+          setOutput(prev => prev + (data.output || '') + '\n');
+        }
 
         if (data.requiresInput && data.promptMessage) {
           setAwaitingInput(true);
@@ -334,6 +513,10 @@ const AICompiler = () => {
         } else {
           setAwaitingInput(false);
           setPromptMessage('');
+        }
+
+        if (data.currentPath) {
+          setCurrentTerminalPath(data.currentPath);
         }
       } catch (err) {
         setOutput(prev => prev + `\n[ERROR] ${err.message}\n`);
@@ -479,13 +662,6 @@ const AICompiler = () => {
     setLoadingInline(false);
   };
 
-  const handleUserInput = (input) => {
-    setUserInputQueue(prev => [...prev, input]);
-    setAwaitingInput(false);
-    setOutput(prev => prev + `> ${input}\n`);
-    setTimeout(() => handleRun(), 100);
-  };
-
   const handleFileTypeChange = (newType) => {
     setFileType(newType);
     setCode('');
@@ -509,7 +685,7 @@ const AICompiler = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleRun, handleAIFix]);
+  }, [code, fileType, currentFileName]);
 
   const hasInlinePrompts = code.includes('xxx ');
   const canUseAI = code.trim().length > 0;
@@ -558,7 +734,7 @@ const AICompiler = () => {
           onNewFolder={handleNewFolder}
           onSaveFile={handleSaveFile}
           onDeleteFile={handleDeleteFile}
-          onFileTypeChange={handleSaveFile}
+          onFileTypeChange={handleFileTypeChange}
           autoSave={autoSave}
           setAutoSave={setAutoSave}
           currentFileName={currentFileName}
@@ -610,7 +786,6 @@ const AICompiler = () => {
           onLoadFile={handleLoadFile}
         />
 
-
         <div style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column' }}>
           {openFiles.length > 0 && (
             <div style={{
@@ -619,49 +794,55 @@ const AICompiler = () => {
               borderBottom: '1px solid #3e3e42',
               overflowX: 'auto'
             }}>
-              {openFiles.map(file => (
-                <div
-                  key={file.path}
-                  onClick={() => loadFileByPath(file.path)}
-                  style={{
-                    padding: '8px 16px',
-                    backgroundColor: currentFilePath === file.path ? '#1e1e1e' : 'transparent',
-                    borderRight: '1px solid #3e3e42',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '13px',
-                    color: currentFilePath === file.path ? '#cccccc' : '#858585',
-                    minWidth: '120px',
-                    maxWidth: '200px'
-                  }}
-                >
-                  <span style={{ 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis', 
-                    whiteSpace: 'nowrap',
-                    flex: 1
-                  }}>
-                    {file.name}
-                  </span>
-                  <button
-                    onClick={(e) => handleCloseTab(file.path, e)}
+              {openFiles.map(file => {
+                const normalizedFilePath = normalizePath(file.path);
+                const normalizedCurrentPath = normalizePath(currentFilePath);
+                const isActive = normalizedFilePath === normalizedCurrentPath;
+                
+                return (
+                  <div
+                    key={normalizedFilePath}
+                    onClick={() => loadFileByPath(file.path)}
                     style={{
-                      padding: '2px',
-                      backgroundColor: 'transparent',
-                      color: '#858585',
-                      border: 'none',
-                      borderRadius: '2px',
+                      padding: '8px 16px',
+                      backgroundColor: isActive ? '#1e1e1e' : 'transparent',
+                      borderRight: '1px solid #3e3e42',
                       cursor: 'pointer',
                       display: 'flex',
-                      alignItems: 'center'
+                      alignItems: 'center',
+                      gap: '8px',
+                      fontSize: '13px',
+                      color: isActive ? '#cccccc' : '#858585',
+                      minWidth: '120px',
+                      maxWidth: '200px'
                     }}
                   >
-                    <X size={14} />
-                  </button>
-                </div>
-              ))}
+                    <span style={{ 
+                      overflow: 'hidden', 
+                      textOverflow: 'ellipsis', 
+                      whiteSpace: 'nowrap',
+                      flex: 1
+                    }}>
+                      {file.name}
+                    </span>
+                    <button
+                      onClick={(e) => handleCloseTab(file.path, e)}
+                      style={{
+                        padding: '2px',
+                        backgroundColor: 'transparent',
+                        color: '#858585',
+                        border: 'none',
+                        borderRadius: '2px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -707,10 +888,10 @@ const AICompiler = () => {
         output={output}
         awaitingInput={awaitingInput}
         promptMessage={promptMessage}
-        onUserInput={handleUserInput}
+        onCommand={handleTerminalCommand}
         clearOutput={() => setOutput('')}
-        currentFilePath={currentFilePath}
-        handleStopStreaming={handleStopStreaming}
+        currentFilePath={currentTerminalPath}
+        fileStructure={fileStructure}
       />
 
       {showHTMLPreview && (
@@ -724,6 +905,5 @@ const AICompiler = () => {
     </div>
   );
 };
-
 
 export default AICompiler;

@@ -7,6 +7,7 @@ const aiController = require('../controllers/aiController');
 const inlineController = require('../controllers/inlineController');
 const runtimeController = require('../controllers/runtimeController');
 const healthController = require('../controllers/healthController');
+const terminalController = require('../controllers/terminalController');
 
 // Middleware
 const { validateModel } = require('../middleware/validateModel');
@@ -32,6 +33,10 @@ router.post('/api/process-inline', validateModel, inlineController.processInline
 
 // -------- JAVASCRIPT RUNTIME --------
 router.post('/api/run-js', runtimeController.runJS);
+
+// -------- TERMINAL ROUTES --------
+router.post('/api/terminal', terminalController.handleCommand);
+router.get('/api/terminal/session', terminalController.getSessionState);
 
 // -------- HEALTH CHECK --------
 router.get('/health', healthController.getHealth);

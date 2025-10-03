@@ -1,19 +1,27 @@
 // controllers/runtimeController.js
 const path = require('path');
+const { getDB } = require('../db');
 
 const runJS = async (req, res) => {
   let responseSent = false;
 
   try {
-    const { code, userInput = [] } = req.body;
+    const { code, userInput = [], currentPath: initPath = '/' } = req.body;
 
     if (!code || typeof code !== 'string') {
-      return res.status(400).json({ output: ['// No valid code provided'] });
+      return res.status(400).json({ 
+        success: false,
+        output: ['// No valid code provided'],
+        currentPath: initPath
+      });
     }
+
+    const db = getDB();
+    const collection = db.collection('files');
 
     let output = [];
     let inputIndex = 0;
-    let currentPath = '/'; // start at root
+    let currentPath = initPath;
 
     const sendResponse = () => {
       if (responseSent) return;
@@ -24,25 +32,21 @@ const runJS = async (req, res) => {
       const lastPrompt = output.filter(l => l.startsWith('[PROMPT] ')).pop();
 
       res.json({
-        output, // array of lines
+        success: true,
+        output,
+        currentPath,
         requiresInput: needsInput,
-        promptMessage: needsInput ? lastPrompt?.replace('[PROMPT] ', '') : null,
-        currentPath
+        promptMessage: needsInput ? lastPrompt?.replace('[PROMPT] ', '') : null
       });
     };
 
-    // Mocked console and prompt
+    // ---------------- Mocked console, prompt, alert, confirm ----------------
     const mockConsole = {
-      log: (...args) => {
-        const message = args.map(arg =>
-          typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-        ).join(' ');
-        output.push(message);
-      },
+      log: (...args) => output.push(args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : String(a)).join(' ')),
       error: (...args) => output.push('ERROR: ' + args.map(String).join(' ')),
       warn: (...args) => output.push('WARN: ' + args.map(String).join(' ')),
       info: (...args) => output.push('INFO: ' + args.map(String).join(' ')),
-      clear: () => output.push('[CONSOLE CLEARED]')
+      clear: () => output.push('[CLEAR]')
     };
 
     const mockPrompt = async (msg = '') => {
@@ -66,13 +70,38 @@ const runJS = async (req, res) => {
       }
     };
 
-    const mockAlert = (msg) => output.push(`[ALERT] ${String(msg)}`);
-    const mockConfirm = (msg) => {
-      output.push(`[CONFIRM] ${String(msg)} → true`);
+    const mockAlert = msg => output.push(`[ALERT] ${msg}`);
+    const mockConfirm = msg => {
+      output.push(`[CONFIRM] ${msg} → true`);
       return true;
     };
 
-    // Global context
+    // ---------------- Helper: async cd that checks MongoDB ----------------
+    const cd = async (folder) => {
+      let targetPath;
+
+      if (folder === '..') {
+        targetPath = path.dirname(currentPath);
+      } else if (folder.startsWith('/')) {
+        targetPath = folder;
+      } else {
+        targetPath = path.join(currentPath, folder);
+      }
+
+      const normalized = targetPath.replace(/^\/+|\/+$/g, '');
+      const folderExists = await collection.findOne({ path: normalized, type: 'folder' });
+
+      if (!folderExists) {
+        output.push(`ERROR: Folder '${folder}' not found`);
+        return currentPath; // keep current path
+      }
+
+      const newPath = normalized ? '/' + normalized : '/';
+      output.push(`Changed directory → ${newPath}`);
+      return newPath;
+    };
+
+    // ---------------- Global context for user code ----------------
     const globalContext = {
       console: mockConsole,
       prompt: mockPrompt,
@@ -83,23 +112,17 @@ const runJS = async (req, res) => {
       Math, Date, JSON, Array, Object, String, Number, Boolean,
       RegExp, Error, parseInt, parseFloat, isNaN, isFinite,
       encodeURIComponent, decodeURIComponent,
-      __currentPath: currentPath, // internal path for cd
-      cd: (folder) => {
-        if (folder === '..') {
-          __currentPath = path.dirname(__currentPath);
-        } else if (folder.startsWith('/')) {
-          __currentPath = folder; // absolute
-        } else {
-          __currentPath = path.join(__currentPath, folder);
-        }
-        currentPath = __currentPath;
-        output.push(`Changed directory → ${currentPath}`);
+      __currentPath: currentPath,
+      cd: async (folder) => {
+        currentPath = await cd(folder);
+        globalContext.__currentPath = currentPath;
       },
       pwd: () => currentPath
     };
 
+    // ---------------- Prepare and execute user code ----------------
     const cleanCode = code.replace(/^\uFEFF/, '').trim();
-    if (!cleanCode) return res.json({ output: ['// Empty code'] });
+    if (!cleanCode) return res.json({ success: true, output: ['// Empty code'], currentPath });
 
     const wrappedCode = `
       (async function() {
@@ -111,15 +134,13 @@ const runJS = async (req, res) => {
       })();
     `;
 
-    const contextKeys = Object.keys(globalContext);
-    const contextValues = Object.values(globalContext);
-
-    const script = new Function(...contextKeys, wrappedCode);
-    const result = script(...contextValues);
+    const script = new Function(...Object.keys(globalContext), wrappedCode);
+    const result = script(...Object.values(globalContext));
 
     if (result && typeof result.then === 'function') {
-      result.catch(err => output.push(`UNCAUGHT PROMISE REJECTION: ${err.message || err}`))
-            .finally(() => sendResponse());
+      result
+        .catch(err => output.push(`UNCAUGHT PROMISE REJECTION: ${err.message || err}`))
+        .finally(() => sendResponse());
     } else {
       sendResponse();
     }
@@ -127,7 +148,7 @@ const runJS = async (req, res) => {
   } catch (err) {
     console.error('❌ JS Execution Error:', err);
     if (!responseSent) {
-      res.json({ output: [`Runtime Error: ${err.message || 'Unknown error'}`] });
+      res.json({ success: false, output: [`Runtime Error: ${err.message || 'Unknown error'}`], currentPath: '/' });
     }
   }
 };
